@@ -10,14 +10,14 @@ export default function ToastContainer({ toasts = [], onDismiss }) {
         const type = toast.type || 'info';
         return (
           <div key={toast.id} className={`toast toast-${type}`}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              {type === 'success' && <CheckCircle2 size={18} color="#34d399" />}
-              {type === 'error' && <AlertCircle size={18} color="#f87171" />}
-              {type === 'warning' && <AlertTriangle size={18} color="#fbbf24" />}
-              {type === 'info' && <Info size={18} color="#22d3ee" />}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              {type === 'success' && <CheckCircle2 size={18} color="#059669" />}
+              {type === 'error' && <AlertCircle size={18} color="#dc2626" />}
+              {type === 'warning' && <AlertTriangle size={18} color="#d97706" />}
+              {type === 'info' && <Info size={18} color="#0284c7" />}
               <div>
-                {toast.title && <strong style={{ display: 'block', fontSize: '0.85rem' }}>{toast.title}</strong>}
-                <span style={{ fontSize: '0.82rem', color: 'var(--text-main)' }}>{toast.message}</span>
+                {toast.title && <strong style={{ display: 'block', fontSize: '0.86rem', color: '#0f172a' }}>{toast.title}</strong>}
+                <span style={{ fontSize: '0.84rem', color: '#334155' }}>{toast.message}</span>
               </div>
             </div>
             <button

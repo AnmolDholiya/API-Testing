@@ -59,18 +59,19 @@ export default function TaskModal({ task, isOpen, onClose, onSave, loading }) {
 
         {error && (
           <div style={{
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            color: '#f87171',
-            padding: '0.65rem 0.85rem',
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            color: '#b91c1c',
+            padding: '0.75rem 0.95rem',
             borderRadius: '8px',
-            fontSize: '0.82rem',
-            marginBottom: '1rem',
+            fontSize: '0.84rem',
+            fontWeight: '500',
+            marginBottom: '1.1rem',
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem'
           }}>
-            <AlertCircle size={15} />
+            <AlertCircle size={16} />
             <span>{error}</span>
           </div>
         )}

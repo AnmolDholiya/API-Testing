@@ -11,17 +11,17 @@ export default function StatsBar({ tasks = [] }) {
   return (
     <div className="stats-grid">
       <div className="stat-card">
-        <div className="stat-icon" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' }}>
+        <div className="stat-icon" style={{ background: '#eff6ff', color: '#2563eb' }}>
           <ListTodo size={22} />
         </div>
         <div>
           <div className="stat-number">{total}</div>
-          <div className="stat-label">Total Loaded</div>
+          <div className="stat-label">Total Tasks</div>
         </div>
       </div>
 
       <div className="stat-card">
-        <div className="stat-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
+        <div className="stat-icon" style={{ background: '#fef3c7', color: '#d97706' }}>
           <Clock size={22} />
         </div>
         <div>
@@ -31,7 +31,7 @@ export default function StatsBar({ tasks = [] }) {
       </div>
 
       <div className="stat-card">
-        <div className="stat-icon" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#22d3ee' }}>
+        <div className="stat-icon" style={{ background: '#e0e7ff', color: '#4f46e5' }}>
           <Clock size={22} />
         </div>
         <div>
@@ -41,7 +41,7 @@ export default function StatsBar({ tasks = [] }) {
       </div>
 
       <div className="stat-card">
-        <div className="stat-icon" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}>
+        <div className="stat-icon" style={{ background: '#ecfdf5', color: '#059669' }}>
           <CheckCircle2 size={22} />
         </div>
         <div>
@@ -51,7 +51,7 @@ export default function StatsBar({ tasks = [] }) {
       </div>
 
       <div className="stat-card">
-        <div className="stat-icon" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
+        <div className="stat-icon" style={{ background: '#fef2f2', color: '#dc2626' }}>
           <Flame size={22} />
         </div>
         <div>

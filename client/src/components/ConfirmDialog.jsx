@@ -17,11 +17,11 @@ export default function ConfirmDialog({
       <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '440px' }}>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
           <div style={{
-            width: '42px',
-            height: '42px',
+            width: '44px',
+            height: '44px',
             borderRadius: '50%',
-            background: 'rgba(239, 68, 68, 0.15)',
-            color: '#f87171',
+            background: '#fef2f2',
+            color: '#dc2626',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -31,22 +31,22 @@ export default function ConfirmDialog({
           </div>
 
           <div>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: '600', marginBottom: '0.4rem' }}>
+            <h3 style={{ fontSize: '1.15rem', fontWeight: '700', color: '#0f172a', marginBottom: '0.4rem' }}>
               {title}
             </h3>
-            <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)', marginBottom: '0.75rem', lineHeight: '1.4' }}>
+            <p style={{ fontSize: '0.88rem', color: '#64748b', marginBottom: '0.85rem', lineHeight: '1.45' }}>
               {message}
             </p>
             {taskTitle && (
               <div style={{
-                background: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '6px',
-                padding: '0.5rem 0.75rem',
-                fontSize: '0.85rem',
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '0.65rem 0.85rem',
+                fontSize: '0.88rem',
                 fontFamily: 'var(--font-sans)',
-                fontWeight: '500',
-                color: 'var(--text-main)',
+                fontWeight: '600',
+                color: '#0f172a',
                 marginBottom: '1rem'
               }}>
                 "{taskTitle}"

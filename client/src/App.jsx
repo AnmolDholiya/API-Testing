@@ -242,26 +242,27 @@ export default function App() {
       {/* Backend Offline Warning Banner */}
       {!backendConnected && (
         <div style={{
-          background: 'rgba(239, 68, 68, 0.12)',
-          border: '1px solid rgba(239, 68, 68, 0.3)',
+          background: '#fef2f2',
+          border: '1px solid #fecaca',
           borderRadius: '12px',
           padding: '1.25rem',
           marginBottom: '1.75rem',
           display: 'flex',
           alignItems: 'flex-start',
-          gap: '1rem'
+          gap: '1rem',
+          boxShadow: 'var(--shadow-card)'
         }}>
-          <ServerCrash size={28} color="#f87171" style={{ flexShrink: 0, marginTop: '2px' }} />
+          <ServerCrash size={28} color="#dc2626" style={{ flexShrink: 0, marginTop: '2px' }} />
           <div>
-            <h3 style={{ fontSize: '1rem', fontWeight: '600', color: '#f87171', marginBottom: '0.3rem' }}>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: '700', color: '#991b1b', marginBottom: '0.3rem' }}>
               Backend Connection Offline (Cannot Reach {BASE_URL})
             </h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
-              Please ensure your Express server is running on <code>http://localhost:5000</code> and MongoDB is running.
+            <p style={{ fontSize: '0.86rem', color: '#b91c1c', marginBottom: '0.75rem' }}>
+              Please ensure your Express server is running on <code style={{ background: '#ffffff', padding: '2px 6px', borderRadius: '4px', border: '1px solid #fecaca' }}>http://localhost:5000</code> and MongoDB is running.
             </p>
             <button
               className="btn btn-secondary"
-              style={{ fontSize: '0.78rem', padding: '0.4rem 0.8rem' }}
+              style={{ fontSize: '0.8rem', padding: '0.45rem 0.9rem' }}
               onClick={() => fetchTasksList(page)}
             >
               <RefreshCw size={13} />
@@ -285,9 +286,9 @@ export default function App() {
         <div className="card">
           <div className="card-header">
             <h2 className="card-title">
-              <Inbox size={20} style={{ color: '#38bdf8' }} />
+              <Inbox size={22} style={{ color: '#4f46e5' }} />
               <span>MongoDB Tasks</span>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 'normal' }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: '600' }}>
                 ({totalCount} Total)
               </span>
             </h2>

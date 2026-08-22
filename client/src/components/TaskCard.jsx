@@ -65,8 +65,8 @@ export default function TaskCard({
           {/* Status Progression Button */}
           {status === 'pending' && (
             <button
-              className="btn btn-secondary"
-              style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem', color: '#60a5fa' }}
+              className="btn"
+              style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem', color: '#4338ca', background: '#e0e7ff', border: '1px solid #c7d2fe' }}
               onClick={() => onToggleStatus(task, 'in-progress')}
               title="Start task (transition to in-progress)"
               disabled={isOptimistic}
@@ -114,7 +114,7 @@ export default function TaskCard({
           {/* Delete Button */}
           <button
             className="btn-icon"
-            style={{ color: '#f87171' }}
+            style={{ color: '#dc2626' }}
             onClick={() => onDelete(task)}
             title="Delete task (DELETE)"
             disabled={isOptimistic}
