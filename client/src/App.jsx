@@ -18,13 +18,20 @@ import {
 } from './services/api';
 import { 
   Search, 
-  Filter, 
+  Plus, 
+  LayoutGrid, 
+  List, 
   Inbox, 
   AlertCircle, 
   RefreshCw, 
   ChevronLeft, 
   ChevronRight,
-  ServerCrash
+  ServerCrash,
+  X,
+  PlusCircle,
+  Clock,
+  Play,
+  CheckCircle2
 } from 'lucide-react';
 
 export default function App() {
@@ -33,6 +40,11 @@ export default function App() {
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+
+  // Layout & View States
+  const [viewMode, setViewMode] = useState('board'); // 'board' (Kanban) or 'list'
+  const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
+  const [newTaskInitialStatus, setNewTaskInitialStatus] = useState('pending');
 
   // Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,7 +57,6 @@ export default function App() {
   const [modalLoading, setModalLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [backendConnected, setBackendConnected] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
 
   // Modal States
   const [editingTask, setEditingTask] = useState(null);
@@ -70,11 +81,10 @@ export default function App() {
   // ── Fetch Tasks from MongoDB Backend ──────────────────────────────────────
   const fetchTasksList = useCallback(async (currentPage = page, search = searchQuery, status = statusFilter, priority = priorityFilter) => {
     setLoading(true);
-    setErrorMessage('');
     try {
       const response = await getTasks({
         page: currentPage,
-        limit: 10,
+        limit: viewMode === 'board' ? 50 : 10,
         search: search || undefined,
         status: status || undefined,
         priority: priority || undefined
@@ -90,12 +100,11 @@ export default function App() {
     } catch (err) {
       console.error('Fetch tasks error:', err);
       setBackendConnected(false);
-      setErrorMessage(err.message);
       addToast('error', err.message, 'Failed to fetch tasks');
     } finally {
       setLoading(false);
     }
-  }, [page, searchQuery, statusFilter, priorityFilter]);
+  }, [page, searchQuery, statusFilter, priorityFilter, viewMode]);
 
   // Initial mount fetch & health check
   useEffect(() => {
@@ -115,7 +124,6 @@ export default function App() {
   // ── Handle Task Creation (POST /tasks) with Optimistic UI Update ──────────
   const handleCreateTask = async (taskPayload) => {
     setCreateLoading(true);
-    // Create optimistic temporary task
     const tempId = `temp-${Date.now()}`;
     const optimisticTask = {
       _id: tempId,
@@ -124,22 +132,20 @@ export default function App() {
       isOptimistic: true
     };
 
-    // Optimistically add to top of state
+    // Optimistically add to state
     setTasks((prev) => [optimisticTask, ...prev]);
 
     try {
       const res = await createTask(taskPayload);
       if (res && res.success) {
-        // Replace temp task with confirmed task from MongoDB
         setTasks((prev) =>
           prev.map((t) => (t._id === tempId ? res.data : t))
         );
         addToast('success', `"${res.data.title}" saved to MongoDB`, 'Task Created');
-        // Refresh full pagination metadata
+        setIsNewTaskModalOpen(false);
         fetchTasksList(page);
       }
     } catch (err) {
-      // Rollback optimistic task on error
       setTasks((prev) => prev.filter((t) => t._id !== tempId));
       addToast('error', err.message, 'Create Task Failed');
       throw err;
@@ -179,10 +185,9 @@ export default function App() {
         setTasks((prev) =>
           prev.map((t) => ((t._id || t.id) === taskId ? res.data : t))
         );
-        addToast('success', `Status changed to ${nextStatus}`, 'Updated');
+        addToast('success', `Task moved to ${nextStatus}`, 'Updated');
       }
     } catch (err) {
-      // Rollback state upon failure
       setTasks(previousTasks);
       addToast('error', `Failed to update status: ${err.message}`, 'Update Error');
     }
@@ -220,7 +225,6 @@ export default function App() {
         setTasks((prev) => prev.filter((t) => (t._id || t.id) !== taskId));
         addToast('success', `Task "${deletingTask.title}" removed`, 'Deleted');
         setDeletingTask(null);
-        // Re-sync count
         fetchTasksList(page);
       }
     } catch (err) {
@@ -230,12 +234,23 @@ export default function App() {
     }
   };
 
+  // Filter tasks for Board columns
+  const pendingTasks = tasks.filter(t => (t.status === 'pending' || (!t.status && !t.completed)));
+  const inProgressTasks = tasks.filter(t => t.status === 'in-progress');
+  const completedTasks = tasks.filter(t => (t.status === 'completed' || t.completed));
+
+  const handleOpenCreateModal = (status = 'pending') => {
+    setNewTaskInitialStatus(status);
+    setIsNewTaskModalOpen(true);
+  };
+
   return (
     <div className="app-container">
-      {/* Navbar & Live Connection Indicator */}
+      {/* Top Navbar */}
       <Navbar
         backendConnected={backendConnected}
         onRefresh={() => fetchTasksList(page)}
+        onOpenNewTask={() => handleOpenCreateModal('pending')}
         loading={loading}
       />
 
@@ -272,22 +287,251 @@ export default function App() {
         </div>
       )}
 
-      {/* Real-Time Metrics Overview */}
-      <StatsBar tasks={tasks} />
+      {/* Interactive Metrics Bar (Click to Filter) */}
+      <StatsBar
+        tasks={tasks}
+        activeFilter={priorityFilter === 'high' ? 'high' : statusFilter}
+        onSelectFilter={(filterKey, type = 'status') => {
+          if (type === 'priority') {
+            setPriorityFilter(filterKey);
+            fetchTasksList(1, searchQuery, statusFilter, filterKey);
+          } else {
+            setStatusFilter(filterKey);
+            fetchTasksList(1, searchQuery, filterKey, priorityFilter);
+          }
+        }}
+      />
 
-      {/* Main Two-Column Layout */}
-      <div className="main-grid">
-        {/* Left Column: Task Creation Form */}
-        <div>
-          <TaskForm onSubmit={handleCreateTask} loading={createLoading} />
+      {/* Unified Control Hub Bar */}
+      <div className="control-hub">
+        <div className="control-left">
+          <div className="search-box" style={{ width: '100%' }}>
+            <Search size={16} className="search-icon" />
+            <input
+              type="text"
+              className="search-input"
+              placeholder="Search tasks across MongoDB by title or description..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  fetchTasksList(1, searchQuery, statusFilter, priorityFilter);
+                }
+              }}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  fetchTasksList(1, '', statusFilter, priorityFilter);
+                }}
+                style={{
+                  position: 'absolute',
+                  right: '10px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Right Column: Filter Bar & Task List */}
+        <div className="control-right">
+          {/* Priority Select */}
+          <select
+            className="form-select"
+            style={{ width: '145px', padding: '0.55rem 0.8rem', fontSize: '0.84rem' }}
+            value={priorityFilter}
+            onChange={(e) => {
+              setPriorityFilter(e.target.value);
+              fetchTasksList(1, searchQuery, statusFilter, e.target.value);
+            }}
+          >
+            <option value="">All Priorities</option>
+            <option value="high">🔴 High</option>
+            <option value="medium">🟡 Medium</option>
+            <option value="low">🟢 Low</option>
+          </select>
+
+          {/* View Mode Switcher */}
+          <div className="view-switcher">
+            <button
+              className={`view-btn ${viewMode === 'board' ? 'active' : ''}`}
+              onClick={() => setViewMode('board')}
+              title="Kanban Board View"
+            >
+              <LayoutGrid size={15} />
+              <span>Board</span>
+            </button>
+            <button
+              className={`view-btn ${viewMode === 'list' ? 'active' : ''}`}
+              onClick={() => setViewMode('list')}
+              title="List Stream View"
+            >
+              <List size={15} />
+              <span>List</span>
+            </button>
+          </div>
+
+          {/* Quick Create Button */}
+          <button
+            className="btn btn-primary"
+            style={{ padding: '0.55rem 1rem' }}
+            onClick={() => handleOpenCreateModal('pending')}
+          >
+            <Plus size={16} />
+            <span>Add Task</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── KANBAN BOARD VIEW ────────────────────────────────────────────── */}
+      {viewMode === 'board' ? (
+        <div className="kanban-board">
+          {/* Column 1: Pending / To Do */}
+          <div className="kanban-column">
+            <div className="kanban-column-header">
+              <div className="column-title">
+                <span className="column-dot" style={{ background: '#d97706' }} />
+                <span>To Do / Pending</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span className="column-count">{pendingTasks.length}</span>
+                <button
+                  className="btn-icon"
+                  onClick={() => handleOpenCreateModal('pending')}
+                  title="Add pending task"
+                  style={{ padding: '0.2rem 0.4rem' }}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div className="column-card-list">
+              {pendingTasks.length === 0 ? (
+                <div className="column-empty">
+                  <Clock size={24} style={{ color: '#d97706', marginBottom: '0.4rem' }} />
+                  <p>No pending tasks</p>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', marginTop: '0.6rem' }}
+                    onClick={() => handleOpenCreateModal('pending')}
+                  >
+                    + Create Task
+                  </button>
+                </div>
+              ) : (
+                pendingTasks.map((task) => (
+                  <TaskCard
+                    key={task._id || task.id}
+                    task={task}
+                    isOptimistic={task.isOptimistic}
+                    onToggleStatus={handleToggleStatus}
+                    onEdit={(t) => setEditingTask(t)}
+                    onDelete={(t) => setDeletingTask(t)}
+                    onViewHateoas={(t) => setInspectingTask(t)}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Column 2: In Progress */}
+          <div className="kanban-column">
+            <div className="kanban-column-header">
+              <div className="column-title">
+                <span className="column-dot" style={{ background: '#4f46e5' }} />
+                <span>In Progress</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span className="column-count">{inProgressTasks.length}</span>
+                <button
+                  className="btn-icon"
+                  onClick={() => handleOpenCreateModal('in-progress')}
+                  title="Add in-progress task"
+                  style={{ padding: '0.2rem 0.4rem' }}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div className="column-card-list">
+              {inProgressTasks.length === 0 ? (
+                <div className="column-empty">
+                  <Play size={24} style={{ color: '#4f46e5', marginBottom: '0.4rem' }} />
+                  <p>No active tasks in progress</p>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                    Click "Start" on any pending task to move it here
+                  </span>
+                </div>
+              ) : (
+                inProgressTasks.map((task) => (
+                  <TaskCard
+                    key={task._id || task.id}
+                    task={task}
+                    isOptimistic={task.isOptimistic}
+                    onToggleStatus={handleToggleStatus}
+                    onEdit={(t) => setEditingTask(t)}
+                    onDelete={(t) => setDeletingTask(t)}
+                    onViewHateoas={(t) => setInspectingTask(t)}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Column 3: Completed */}
+          <div className="kanban-column">
+            <div className="kanban-column-header">
+              <div className="column-title">
+                <span className="column-dot" style={{ background: '#059669' }} />
+                <span>Completed</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span className="column-count">{completedTasks.length}</span>
+              </div>
+            </div>
+
+            <div className="column-card-list">
+              {completedTasks.length === 0 ? (
+                <div className="column-empty">
+                  <CheckCircle2 size={24} style={{ color: '#059669', marginBottom: '0.4rem' }} />
+                  <p>No completed tasks yet</p>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                    Check off tasks as you finish them
+                  </span>
+                </div>
+              ) : (
+                completedTasks.map((task) => (
+                  <TaskCard
+                    key={task._id || task.id}
+                    task={task}
+                    isOptimistic={task.isOptimistic}
+                    onToggleStatus={handleToggleStatus}
+                    onEdit={(t) => setEditingTask(t)}
+                    onDelete={(t) => setDeletingTask(t)}
+                    onViewHateoas={(t) => setInspectingTask(t)}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* ── STREAM / LIST VIEW ────────────────────────────────────────── */
         <div className="card">
           <div className="card-header">
             <h2 className="card-title">
               <Inbox size={22} style={{ color: '#4f46e5' }} />
-              <span>MongoDB Tasks</span>
+              <span>MongoDB Tasks List</span>
               <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: '600' }}>
                 ({totalCount} Total)
               </span>
@@ -310,51 +554,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* Search & Secondary Filter Bar */}
-          <div className="filter-container">
-            <div className="search-box">
-              <Search size={16} className="search-icon" />
-              <input
-                type="text"
-                className="search-input"
-                placeholder="Search tasks by title or description..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    fetchTasksList(1, searchQuery, statusFilter, priorityFilter);
-                  }
-                }}
-              />
-            </div>
-
-            <select
-              className="form-select"
-              style={{ width: '130px', padding: '0.6rem 0.8rem' }}
-              value={priorityFilter}
-              onChange={(e) => {
-                setPriorityFilter(e.target.value);
-                fetchTasksList(1, searchQuery, statusFilter, e.target.value);
-              }}
-            >
-              <option value="">All Priorities</option>
-              <option value="high">🔴 High</option>
-              <option value="medium">🟡 Medium</option>
-              <option value="low">🟢 Low</option>
-            </select>
-
-            <button
-              className="btn btn-secondary"
-              onClick={() => fetchTasksList(1, searchQuery, statusFilter, priorityFilter)}
-            >
-              Search
-            </button>
-          </div>
-
-          {/* Task Items List */}
           <div className="task-items-container">
             {loading && tasks.length === 0 ? (
-              // Loading Skeleton
               Array.from({ length: 3 }).map((_, idx) => (
                 <div
                   key={idx}
@@ -363,7 +564,6 @@ export default function App() {
                 />
               ))
             ) : tasks.length === 0 ? (
-              // Empty State
               <div className="empty-state">
                 <div className="empty-icon">📭</div>
                 <h4 style={{ fontSize: '1rem', color: 'var(--text-main)', marginBottom: '0.3rem' }}>
@@ -372,11 +572,10 @@ export default function App() {
                 <p style={{ fontSize: '0.85rem' }}>
                   {searchQuery || statusFilter || priorityFilter
                     ? 'No tasks match the active search and filter criteria.'
-                    : 'Create your first task using the form on the left!'}
+                    : 'Click "+ Add Task" to create your first task!'}
                 </p>
               </div>
             ) : (
-              // Task Cards
               tasks.map((task) => (
                 <TaskCard
                   key={task._id || task.id}
@@ -391,7 +590,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Pagination Controls */}
           {totalPages > 1 && (
             <div className="pagination-wrapper">
               <button
@@ -426,7 +624,30 @@ export default function App() {
             </div>
           )}
         </div>
-      </div>
+      )}
+
+      {/* ── CREATE TASK MODAL ────────────────────────────────────────────── */}
+      {isNewTaskModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsNewTaskModalOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <PlusCircle size={22} color="#4f46e5" />
+                <h3 className="modal-title">Create New Task (POST /tasks)</h3>
+              </div>
+              <button className="btn-icon" onClick={() => setIsNewTaskModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <TaskForm
+              onSubmit={handleCreateTask}
+              loading={createLoading}
+              initialStatus={newTaskInitialStatus}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Edit Task Modal (PUT) */}
       <TaskModal

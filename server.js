@@ -4,18 +4,17 @@ const cors = require('cors');
 require('dotenv').config();
 
 // Middleware
-const loggerMiddleware     = require('./src/middleware/logger');
+const loggerMiddleware = require('./src/middleware/logger');
 const contentTypeMiddleware = require('./src/middleware/contentType');
-const notFoundHandler      = require('./src/middleware/notFound');
-const errorHandler         = require('./src/middleware/errorHandler');
+const notFoundHandler = require('./src/middleware/notFound');
+const errorHandler = require('./src/middleware/errorHandler');
 
 // Routes
 const taskRoutes = require('./src/routes/taskRoutes');
 
 const app = express();
 
-// ── Core middleware ──────────────────────────────────────────────────────────
-// Enable CORS for frontend clients (React Vite on 5173, etc.)
+
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

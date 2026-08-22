@@ -1,16 +1,20 @@
 /**
  * Central API Service Layer for Practical 6 Full-Stack Integration
- * Connects React UI (port 5173) to Node/Express/MongoDB Backend (port 5000)
+ * Connects React UI (port 5173) to Node/Express/MongoDB Backend (port 5000 / 3000)
  */
 
-export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+export let BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+const FALLBACK_PORTS = ['http://localhost:5000', 'http://localhost:3000'];
+
+export function setBaseUrl(newUrl) {
+  BASE_URL = newUrl;
+}
 
 /**
- * Standardized Fetch Helper with JSON parsing and error extraction
+ * Standardized Fetch Helper with JSON parsing and auto-port recovery
  */
 async function request(endpoint, options = {}) {
-  const url = endpoint.startsWith('http') ? endpoint : `${BASE_URL}${endpoint}`;
-  
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {})
@@ -21,7 +25,9 @@ async function request(endpoint, options = {}) {
     headers
   };
 
-  try {
+  // Helper to attempt fetch at a specific base URL
+  const attemptFetch = async (baseUrl) => {
+    const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
     const response = await fetch(url, config);
     const data = await response.json().catch(() => null);
 
@@ -37,9 +43,25 @@ async function request(endpoint, options = {}) {
     }
 
     return data;
+  };
+
+  try {
+    return await attemptFetch(BASE_URL);
   } catch (err) {
     if (err.name === 'TypeError' && err.message.includes('fetch')) {
-      throw new Error(`Cannot connect to backend server at ${BASE_URL}. Ensure Express backend is running on port 5000 and CORS is enabled.`);
+      // If primary port failed, try alternate known port
+      for (const altUrl of FALLBACK_PORTS) {
+        if (altUrl !== BASE_URL) {
+          try {
+            const data = await attemptFetch(altUrl);
+            BASE_URL = altUrl; // Successfully auto-discovered active port
+            return data;
+          } catch {
+            // continue checking
+          }
+        }
+      }
+      throw new Error(`Cannot connect to backend server at ${BASE_URL}. Ensure Express backend is running (npm run server) and MongoDB is running.`);
     }
     throw err;
   }
@@ -119,13 +141,19 @@ export async function executeHypermediaAction(href, method = 'GET', body = null)
 }
 
 /**
- * Health check to ping backend server
+ * Health check to ping backend server with auto-port detection
  */
 export async function checkBackendHealth() {
-  try {
-    const res = await fetch(`${BASE_URL}/tasks?limit=1`, { method: 'GET' });
-    return { ok: res.ok, status: res.status };
-  } catch (err) {
-    return { ok: false, error: err.message };
+  for (const url of [BASE_URL, ...FALLBACK_PORTS.filter(u => u !== BASE_URL)]) {
+    try {
+      const res = await fetch(`${url}/tasks?limit=1`, { method: 'GET' });
+      if (res.ok) {
+        BASE_URL = url;
+        return { ok: true, status: res.status, url };
+      }
+    } catch {
+      // try next
+    }
   }
+  return { ok: false, error: 'Connection failed' };
 }

@@ -1,7 +1,7 @@
 import React from 'react';
-import { Layers, RefreshCw, CheckCircle2, AlertCircle, Database, Server } from 'lucide-react';
+import { Layers, RefreshCw, CheckCircle2, AlertCircle, Database, Server, PlusCircle } from 'lucide-react';
 
-export default function Navbar({ backendConnected, onRefresh, loading }) {
+export default function Navbar({ backendConnected, onRefresh, onOpenNewTask, loading }) {
   return (
     <header className="navbar">
       <div className="brand-section">
@@ -40,7 +40,16 @@ export default function Navbar({ backendConnected, onRefresh, loading }) {
           title="Refresh task list from MongoDB"
         >
           <RefreshCw size={15} className={loading ? 'spinner' : ''} />
-          <span>Sync Data</span>
+          <span>Sync</span>
+        </button>
+
+        <button
+          className="btn btn-primary"
+          onClick={onOpenNewTask}
+          title="Create a new task in MongoDB"
+        >
+          <PlusCircle size={16} />
+          <span>New Task</span>
         </button>
       </div>
     </header>
