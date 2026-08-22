@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
+    "server": "node server.js",
+    "client": "npm run dev --prefix client",
+    "client:build": "npm run build --prefix client",
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue,magenta\" \"npm run server\" \"npm run client\"",
     "test": "node test-api.js"
   },
   "keywords": [
@@ -18,11 +21,13 @@
   "author": "ADWF Practical 4",
   "license": "MIT",
   "dependencies": {
+    "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "mongoose": "^9.9.1"
   },
   "devDependencies": {
+    "concurrently": "^10.0.5",
     "mongodb-memory-server": "^11.2.0"
   }
 }

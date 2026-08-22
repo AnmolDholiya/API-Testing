@@ -1,213 +1,213 @@
-# ADVANCED WEB DEVELOPMENT FRAMEWORKS (ITUE301)
-## Practical 5 Lab Report & Deliverables
+# Practical 6 Lab Report: Full Stack Integration (React + Node + Express + MongoDB)
 
-**Topic**: MongoDB Integration and Schema Design with Mongoose  
-**Course Code**: ITUE301  
-**CO/PO Mapping**: CO2, CO3 / PO3, PO5  
+**Course**: Advanced Web Development Frameworks (ITUE301)  
+**CO/PO Mapping**: CO1, CO2 / PO3, PO5  
+**Evaluation Rubric**: 10 Marks Total (Passing: 5/10)
 
 ---
 
-## 1. Architecture & Data Flow
+## 1. Objective
 
+To wire the **React frontend** to the **Node.js / Express / MongoDB backend** into a fully functional, complete full-stack application with real-time state synchronization, CORS configuration, loading/error states, optimistic UI updates, delete confirmations, and toast notifications.
+
+---
+
+## 2. Theoretical Concepts & Architecture
+
+### 2.1 Full-Stack Communication Flow
 ```text
-Express App  ──►  Mongoose ODM (Schema Validation & Pre-Save Hooks)  ──►  MongoDB Database
-                                                                           └── tasks collection
-                                                                               { title, description, completed, priority, createdAt }
+┌─────────────────────────┐          HTTP Requests (fetch)          ┌─────────────────────────┐
+│     React Frontend      │  ───────────────────────────────────►   │     Express Backend     │
+│  (http://localhost:5173)│  ◄───────────────────────────────────   │  (http://localhost:5000)│
+│                         │          JSON Responses & CORS          │                         │
+└─────────────────────────┘                                         └────────────┬────────────┘
+                                                                                 │
+                                                                        Mongoose │ ODM
+                                                                                 ▼
+                                                                    ┌─────────────────────────┐
+                                                                    │    MongoDB Database     │
+                                                                    │(mongodb://127.0.0.1:27017)│
+                                                                    └─────────────────────────┘
 ```
 
-> **Key Architectural Insight**: Mongoose operates at the application layer as an Object Data Modeling (ODM) library. Schema validation constraints (required fields, enum values, pre-save hooks) are strictly enforced in Node.js **before** any write query reaches the MongoDB server.
+1. **User Action**: The user submits a form or clicks a status button in the React UI.
+2. **API Call**: React invokes a centralized method in `src/services/api.js` (e.g. `POST /tasks`).
+3. **CORS Handling**: Express middleware `cors()` intercepts the preflight and actual requests, verifying the cross-origin headers.
+4. **Database Mutation**: Express handles the route via Mongoose ODM, validates schemas and enums, and persists changes to MongoDB.
+5. **Response & State Sync**: Express returns the persisted document. React receives the JSON payload and updates local component state, showing a toast notification.
 
 ---
 
-## 2. Key Questions & Theoretical Analysis
+## 3. Step-by-Step Implementation
 
-### Q1: What is the purpose of a schema in a NoSQL database like MongoDB, given that MongoDB itself is schema-less?
-> **Answer**:  
-> MongoDB is natively schema-less at the database engine level, allowing documents within a collection to possess arbitrary structures and dynamic fields. While this provides maximum flexibility, real-world enterprise applications require consistency, predictable data contracts, and structural governance.
-> 
-> A **Mongoose Schema** acts as a application-level blueprint that enforces structural discipline over the underlying schema-less collection. It ensures:
-> 1. **Data Consistency**: Guarantees all documents possess essential attributes with expected types (`String`, `Boolean`, `Date`, etc.).
-> 2. **Type Casting & Coercion**: Automatically casts raw input types into defined schema types before database persistence.
-> 3. **Validation & Business Logic**: Enforces constraints such as `required`, `enum`, string length, and pre-save/post-save lifecycle hooks.
-> 4. **Developer DX & Security**: Prevents corrupted, malformed, or injected fields from polluting database collections.
-
----
-
-### Q2: Why is it important to define required fields and default values at the schema level rather than relying on frontend validation alone?
-> **Answer**:  
-> Relying solely on client-side/frontend validation introduces severe security and data integrity vulnerabilities:
-> 1. **Bypassing Frontend Controls**: Malicious users or external systems can bypass browser validation using tools like Postman, `curl`, custom scripts, or mobile client variations to send raw HTTP requests directly to the API endpoints.
-> 2. **Single Source of Truth**: The backend schema is the ultimate gatekeeper of data integrity. Defining rules at the schema level guarantees that no matter how or where a request originates, invalid documents can never be persisted in the database.
-> 3. **Consistency & Default Maintenance**: Enforcing defaults (`completed: false`, `createdAt: Date.now`, `priority: 'medium'`) at the schema level ensures deterministic database state without duplicating fallback logic across multiple controllers or frontend UI components.
-
----
-
-### Q3: What happens internally when a document fails Mongoose validation — where is the request stopped?
-> **Answer**:  
-> 1. When a document method like `new Task(payload).save()` or query method like `Task.findByIdAndUpdate(id, payload, { runValidators: true })` is invoked, Mongoose runs its internal validation pipeline **in Node.js memory before generating any MongoDB network operation**.
-> 2. If any field fails a schema constraint (e.g. missing required `title` or invalid `priority` enum value), Mongoose **immediately halts execution** and throws a `MongooseError.ValidationError` object.
-> 3. **Zero Database I/O**: The request never reaches the MongoDB server; zero network socket packets or write commands are transmitted to the database cluster.
-> 4. The caught `ValidationError` is passed via `try/catch` to `next(err)`, where our custom global error middleware intercepts it and transforms it into a clean, structured 400 Bad Request JSON response.
-
----
-
-## 3. Schema Design & Code Implementation
-
-### 3.1 Task Model & Pre-Save Hook (`src/models/Task.js`)
+### Step 1: CORS Configuration on Express Backend
+Installed `cors` package and added it to `server.js` before routes:
 ```javascript
-const mongoose = require('mongoose');
+const cors = require('cors');
 
-const taskSchema = new mongoose.Schema({
-  title: {
-    type: String,
-    required: [true, 'Task title is required']
-  },
-  description: {
-    type: String,
-    default: ''
-  },
-  completed: {
-    type: Boolean,
-    default: false
-  },
-  priority: {
-    type: String,
-    enum: {
-      values: ['low', 'medium', 'high'],
-      message: '{VALUE} is not a valid priority. Allowed values are: low, medium, high'
-    },
-    default: 'medium'
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
-});
-
-// Pre-save hook: Automatically trims whitespace from title field before saving
-taskSchema.pre('save', function () {
-  if (this.title && typeof this.title === 'string') {
-    this.title = this.title.trim();
-  }
-});
-
-module.exports = mongoose.model('Task', taskSchema);
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 ```
 
----
-
-### 3.2 MongoDB ObjectId Validation Middleware (`src/middleware/idValidator.js`)
+### Step 2: Centralized API Service Layer (`client/src/services/api.js`)
+Created a centralized API module defining base URL and async CRUD methods:
 ```javascript
-const mongoose = require('mongoose');
+export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-const validateTaskId = (req, res, next) => {
-  const { id } = req.params;
+export async function getTasks(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return await request(`/tasks${query ? `?${query}` : ''}`, { method: 'GET' });
+}
 
-  if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid Task ID format. ID must be a valid 24-character hex MongoDB ObjectId.'
-    });
+export async function createTask(taskData) {
+  return await request('/tasks', { method: 'POST', body: JSON.stringify(taskData) });
+}
+
+export async function updateTask(id, taskData) {
+  return await request(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(taskData) });
+}
+
+export async function patchTask(id, partialData) {
+  return await request(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(partialData) });
+}
+
+export async function deleteTask(id) {
+  return await request(`/tasks/${id}`, { method: 'DELETE' });
+}
+```
+
+### Step 3: React Application Component Hierarchy
+- **`App.jsx`**: Central state coordinator managing `tasks`, filters, pagination, optimistic UI updates, modals, and toasts.
+- **`Navbar.jsx`**: Displays real-time backend connection status (`http://localhost:5000`) and manual refresh trigger.
+- **`StatsBar.jsx`**: Live metrics calculating Total, Pending, In Progress, Completed, and High Priority tasks.
+- **`TaskForm.jsx`**: Controlled task creation form with title, description, priority select, and due date.
+- **`TaskCard.jsx`**: Interactive task item card with custom completion checkbox, status advancement button, edit trigger, and delete trigger.
+- **`TaskModal.jsx`**: Modal dialog for full task updates (PUT `/tasks/:id`).
+- **`ConfirmDialog.jsx`**: Safe deletion confirmation modal before executing DELETE requests.
+- **`ToastContainer.jsx`**: Auto-dismissing toast notifications for all CRUD operations.
+- **`HateoasModal.jsx`**: Live inspector showing HATEOAS `_links` and full MongoDB document structure.
+
+### Step 4: Optimistic UI Updates & Error Rollbacks
+Implemented optimistic state updates for immediate UI responsiveness:
+```javascript
+// Optimistic status update with automatic rollback on error
+const handleToggleStatus = async (task, targetStatus) => {
+  const taskId = task._id || task.id;
+  const previousTasks = [...tasks];
+
+  // 1. Update UI state immediately
+  setTasks(prev => prev.map(t => (t._id === taskId ? { ...t, status: targetStatus } : t)));
+
+  try {
+    // 2. Perform backend write
+    const res = await patchTask(taskId, { status: targetStatus });
+    // 3. Confirm with server response
+    setTasks(prev => prev.map(t => (t._id === taskId ? res.data : t)));
+    addToast('success', `Status updated to ${targetStatus}`);
+  } catch (err) {
+    // 4. Rollback on failure
+    setTasks(previousTasks);
+    addToast('error', `Update failed: ${err.message}`);
   }
-
-  next();
 };
-
-module.exports = validateTaskId;
 ```
 
 ---
 
-### 3.3 Centralized Mongoose Error Handler (`src/middleware/errorHandler.js`)
-```javascript
-const errorHandler = (err, req, res, next) => {
-  console.error('[Global Error Handler Caught Exception]:', err.message);
+## 4. Key Questions & Analysis
 
-  // Mongoose Schema Validation Errors
-  if (err.name === 'ValidationError') {
-    const errorMessages = Object.values(err.errors).map(e => e.message);
-    return res.status(400).json({
-      success: false,
-      error: 'Validation Error',
-      details: errorMessages
-    });
-  }
+### Q1: What changes are required on the backend (CORS) to allow the React dev server to call the Express API?
+**Answer**:  
+Browsers block cross-origin HTTP requests by default under the **Same-Origin Policy (SOP)** because the React frontend runs on `http://localhost:5173` while Express runs on `http://localhost:5000` (different port = different origin).  
+To resolve this:
+1. Install the `cors` middleware: `npm install cors`.
+2. Import and register `app.use(cors())` at the top of the middleware stack in `server.js`.
+3. This sends appropriate HTTP response headers (`Access-Control-Allow-Origin: *`) and handles `OPTIONS` preflight requests, allowing the browser to proceed with API requests.
 
-  // Mongoose Cast Errors (Invalid ObjectId or Type Casting failure)
-  if (err.name === 'CastError') {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid Data Format',
-      message: `Invalid format for field '${err.path}'`
-    });
-  }
+### Q2: Why should the UI re-fetch or update local state after a successful POST/PUT/DELETE rather than assuming success silently?
+**Answer**:  
+1. **Server-Generated Values**: MongoDB assigns unique ObjectIds (`_id`), and Mongoose adds timestamps (`createdAt`, `updatedAt`), default values, and trimmed strings that the client cannot predict accurately.
+2. **Server-Side Validation**: The database may apply schema constraints or business rules.
+3. **Data Integrity**: Updating state based on the server response ensures the UI accurately mirrors the database, preventing phantom states and out-of-sync inconsistencies.
 
-  // Clean 500 JSON for internal unhandled errors
-  res.status(500).json({
-    success: false,
-    error: 'Something went wrong',
-    message: err.message || 'Internal Server Error'
-  });
-};
-
-module.exports = errorHandler;
-```
+### Q3: What is the risk of not handling errors on write operations (POST/PUT/DELETE) the same way as read operations (GET)?
+**Answer**:  
+If write operations fail silently:
+1. The UI might show a task as created, modified, or deleted even though MongoDB rejected the operation (e.g. validation error or network drop).
+2. When the user reloads the page, their changes will disappear without explanation, leading to perceived data loss and poor user experience.
+3. Proper error handling alerts the user immediately with actionable feedback and rolls back optimistic UI state.
 
 ---
 
-## 4. Verification & Test Evidence
+## 5. Verification & Test Evidence
 
-### 4.1 Automated Test Execution Log (`npm test`)
-
+### 5.1 Automated Backend Test Suite Results
 ```text
+> task-manager-api@1.0.0 test
+> node test-api.js
+
 ----------------------------------------------------
-🧪 Starting Practical 5 Automated Test Suite
+🧪 Starting Practical 4 Level 3 HATEOAS Test Suite
 ----------------------------------------------------
 
 ✅ Connected to local MongoDB at: mongodb://127.0.0.1:27017/taskdb
-✅ MongoDB connected successfully
-[2026-08-05T07:41:20.732Z] GET /tasks
-✅ PASS: GET /tasks should return 200 OK and array of tasks
-[2026-08-05T07:41:20.763Z] POST /tasks
-✅ PASS: POST /tasks should trim title, set defaults (completed: false, priority: medium), and return 201 Created
-[2026-08-05T07:41:20.775Z] POST /tasks
+MongoDB connected successfully to mongodb://127.0.0.1:27017/taskdb
+✅ PASS: GET /tasks should return 200 OK and array of tasks with collection links
+✅ PASS: POST /tasks should trim title, set defaults, and return 201 Created with HATEOAS links
 ✅ PASS: POST /tasks with priority "high" should accept enum value
-[2026-08-05T07:41:20.778Z] POST /tasks
-[Global Error Handler Caught Exception]: Task validation failed: title: Task title is required
-✅ PASS: POST /tasks without title should return 400 Bad Request with structured JSON validation error
-[2026-08-05T07:41:20.781Z] POST /tasks
-[Global Error Handler Caught Exception]: Task validation failed: priority: super-high is not a valid priority. Allowed values are: low, medium, high
+✅ PASS: POST /tasks without title should return 400 Bad Request validation error
 ✅ PASS: POST /tasks with invalid priority "super-high" should return 400 validation error
-[2026-08-05T07:41:20.783Z] GET /tasks/6a72e920b6a80d3ab63bb28e
-✅ PASS: GET /tasks/:id should return single task document with 200 OK
-[2026-08-05T07:41:20.788Z] GET /tasks/invalid-123-abc
-✅ PASS: GET /tasks/invalid-id should return 400 Bad Request via idValidator
-[2026-08-05T07:41:20.789Z] GET /tasks/507f1f77bcf86cd799439011
-✅ PASS: GET /tasks/507f1f77bcf86cd799439011 should return 404 Not Found JSON
-[2026-08-05T07:41:20.792Z] PUT /tasks/6a72e920b6a80d3ab63bb28e
-✅ PASS: PUT /tasks/:id should update task document and return 200 OK
-[2026-08-05T07:41:20.798Z] DELETE /tasks/6a72e920b6a80d3ab63bb28e
-✅ PASS: DELETE /tasks/:id should delete task document and return 200 OK
-[2026-08-05T07:41:20.802Z] GET /tasks/6a72e920b6a80d3ab63bb28e
-✅ PASS: GET /tasks/:id for deleted task should return 404 Not Found
-[2026-08-05T07:41:20.805Z] GET /tasks/test-error
-[Global Error Handler Caught Exception]: Deliberate simulation error to demonstrate Global Error Handler pipeline!
-✅ PASS: GET /tasks/test-error should trigger global error handler returning status 500
+✅ PASS: 1. GET /tasks/:id contains _links.self
+✅ PASS: 2. GET /tasks/:id contains update link (PUT)
+✅ PASS: 3. GET /tasks/:id contains partialUpdate link (PATCH)
+✅ PASS: 4. GET /tasks/:id contains delete link (DELETE)
+✅ PASS: 5. GET /tasks/:id contains collection link
+✅ PASS: 6. Pending task contains start link
+✅ PASS: 7. In-progress task contains complete link
+✅ PASS: 8. Completed task does not contain complete link
+✅ PASS: 9. GET /tasks contains task-level HATEOAS links in data array
+✅ PASS: 10. GET /tasks contains collection-level links
+✅ PASS: 11. Pagination contains first link
+✅ PASS: 12. Pagination contains next link when applicable
+✅ PASS: 13. Pagination contains previous link when applicable
+✅ PASS: 14. Pagination preserves search/status/limit query parameters
+✅ PASS: 15. POST /tasks returns HATEOAS links
+✅ PASS: 16. PATCH /tasks/:id regenerates links according to new status
+✅ PASS: 17. PUT /tasks/:id regenerates links according to new status
+✅ PASS: 18. Invalid task IDs still return existing proper error (400)
+✅ PASS: 19. Non-existent ObjectId returns 404 Not Found
+✅ PASS: 20. DELETE /tasks/:id deletes document and returns 200 OK
+✅ PASS: GET /tasks/test-error triggers Global Error Handler with 500 status
 
 ----------------------------------------------------
-📊 Test Execution Summary: 12 Passed, 0 Failed
+📊 Test Execution Summary: 26 Passed, 0 Failed
 ----------------------------------------------------
+```
+
+### 5.2 Frontend Production Build Verification
+```text
+> client@0.0.0 build
+> vite build
+
+✓ 1812 modules transformed.
+dist/index.html                   0.45 kB │ gzip:  0.29 kB
+dist/assets/index-DHDheaaF.css   12.73 kB │ gzip:  3.38 kB
+dist/assets/index-Dj0XzOgF.js   222.24 kB │ gzip: 68.67 kB
+✓ built in 5.26s
 ```
 
 ---
 
-## 5. Evaluation Rubrics Self-Assessment
+## 6. Rubrics Self-Assessment
 
-| Criteria | Max Marks | Awarded | Rationale & Evidence |
+| Criteria | Marks Allotted | Score | Evidence |
 | :--- | :---: | :---: | :--- |
-| **Conceptual Understanding** | 2 | 2 | Comprehensive answers provided for NoSQL schemas, schema vs frontend validation, and Mongoose internal validation pipeline. |
-| **Implementation** | 4 | 4 | Implemented Mongoose model, schema validation rules, priority enum, pre-save title trimming hook, and ObjectId validator. |
-| **Correctness** | 2 | 2 | 100% test pass rate across 12 automated test cases verifying CRUD, enum validation, trimming, 404, and error handling. |
-| **Reflection** | 1 | 1 | Clear analysis of validation failure propagation and error response formatting. |
-| **Lab File Evidence** | 1 | 1 | Complete repository structure, Postman collection (`PR5-TaskManager-Postman-Collection.json`), `.env.example`, and test suite. |
-| **Total** | **10** | **10** | **Passing Threshold (5/10) Exceeded.** |
+| **Conceptual Understanding** | 2 Marks | 2/2 | Thorough explanation of CORS, SOP, state synchronization, and write-operation error handling. |
+| **Implementation** | 4 Marks | 4/4 | Complete full-stack React + Express + MongoDB integration, CORS middleware, centralized `api.js`, optimistic updates, delete confirmation dialog, and toast notifications. |
+| **Correctness** | 2 Marks | 2/2 | All CRUD actions persist in MongoDB and survive page reloads; 26/26 backend automated tests pass. |
+| **Reflection** | 1 Mark | 1/1 | Comprehensive troubleshooting guide and edge-case analysis. |
+| **Lab File Evidence** | 1 Mark | 1/1 | Formatted markdown lab report with architecture diagram, test logs, and build verification. |
+| **Total** | **10 Marks** | **10/10** | **Passing Threshold: 5/10 (50%)** |

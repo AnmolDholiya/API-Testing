@@ -1,122 +1,183 @@
-# Practical 4: RESTful API with Node.js and Express (Level 3 HATEOAS)
+# Practical 6: Full Stack Integration (React + Node.js + Express + MongoDB)
 
 **Course**: Advanced Web Development Frameworks (ITUE301)  
-**CO/PO Mapping**: CO2 / PO3, PO5  
+**CO/PO Mapping**: CO1, CO2 / PO3, PO5  
 
 ---
 
 ## 🎯 Objective
 
-Design and implement a Richardson Maturity Model Level 3 RESTful API using Node.js, Express, and MongoDB (Mongoose). Features a complete middleware pipeline, custom logging, route parameter validation, centralized error handling, and **HATEOAS (Hypermedia As The Engine Of Application State)**.
+Wire the **React frontend** to the **Node/Express/MongoDB backend** into a fully functional, production-ready full-stack application. Supports end-to-end CRUD operations, real-time MongoDB persistence, CORS middleware integration, centralized API services, optimistic UI updates, confirmation dialogs, and toast notifications.
 
 ---
 
-## 🏆 REST Maturity Level
+## 🏗️ Architecture & Data Flow
 
-This API complies with **Richardson Maturity Model Level 3**:
-
-- **Level 0**: Single URI using HTTP POST as a transport mechanism (e.g. SOAP or RPC).
-- **Level 1 (Resources)**: Multiple URIs separating concepts into individual resources (e.g. `/tasks`).
-- **Level 2 (HTTP Verbs & Status Codes)**: Correct usage of standard HTTP methods (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) and HTTP status codes (`200`, `201`, `400`, `404`, `500`).
-- **Level 3 (HATEOAS - Implemented)**: Responses return hypermedia control controls (`_links`) informing the client what actions and resources are available dynamically.
-
----
-
-## 🔗 HATEOAS `_links` Specifications
-
-### 1. Single Task Resource Hypermedia
-Every task representation returns contextual hypermedia controls based on its current lifecycle status.
-
-#### Example Response (`GET /tasks/:id` for a `pending` task):
-```json
-{
-  "success": true,
-  "data": {
-    "_id": "64d2e8f1a1b2c3d4e5f67890",
-    "title": "Build Level 3 HATEOAS Engine",
-    "description": "Implement hypermedia link utility",
-    "status": "pending",
-    "priority": "high",
-    "completed": false,
-    "createdAt": "2026-08-12T12:00:00.000Z",
-    "updatedAt": "2026-08-12T12:00:00.000Z"
-  },
-  "_links": {
-    "self": { "href": "/tasks/64d2e8f1a1b2c3d4e5f67890", "method": "GET" },
-    "update": { "href": "/tasks/64d2e8f1a1b2c3d4e5f67890", "method": "PUT" },
-    "partialUpdate": { "href": "/tasks/64d2e8f1a1b2c3d4e5f67890", "method": "PATCH" },
-    "start": { "href": "/tasks/64d2e8f1a1b2c3d4e5f67890", "method": "PATCH" },
-    "delete": { "href": "/tasks/64d2e8f1a1b2c3d4e5f67890", "method": "DELETE" },
-    "collection": { "href": "/tasks", "method": "GET" }
-  }
-}
-```
-
-### 2. Status-Aware Hypermedia Actions
-
-The available actions dynamically reflect the task's state:
-
-- **`pending`**: Exposes `start` action (`PATCH` to set status to `in-progress`).
-- **`in-progress`**: Exposes `complete` action (`PATCH` to set status to `completed`).
-- **`completed`**: Does **NOT** expose `start` or `complete` actions.
-
----
-
-### 3. Collection & Pagination Hypermedia
-
-`GET /tasks` provides collection navigation links and preserves query parameters (`search`, `status`, `completed`, `priority`, `limit`):
-
-```json
-{
-  "success": true,
-  "count": 10,
-  "total": 45,
-  "page": 2,
-  "totalPages": 5,
-  "data": [ /* Array of tasks with item-level _links */ ],
-  "_links": {
-    "self": { "href": "/tasks?search=api&status=pending&page=2&limit=10", "method": "GET" },
-    "first": { "href": "/tasks?search=api&status=pending&page=1&limit=10", "method": "GET" },
-    "previous": { "href": "/tasks?search=api&status=pending&page=1&limit=10", "method": "GET" },
-    "next": { "href": "/tasks?search=api&status=pending&page=3&limit=10", "method": "GET" },
-    "last": { "href": "/tasks?search=api&status=pending&page=5&limit=10", "method": "GET" },
-    "create": { "href": "/tasks", "method": "POST" }
-  }
-}
+```text
+┌─────────────────────────────────────────────────────────┐
+│              React Frontend (Vite)                      │
+│             http://localhost:5173                       │
+│  - TaskForm (POST /tasks)                               │
+│  - TaskList & TaskCard (GET, PUT, PATCH, DELETE)        │
+│  - StatsBar & Metrics                                   │
+│  - Centralized API Service (src/services/api.js)        │
+│  - Optimistic UI Updates & Toast Feedback               │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+             HTTP / CORS   │  JSON Requests
+      (GET, POST, PUT,     │  & Responses
+       PATCH, DELETE)      │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│              Express.js Backend                         │
+│             http://localhost:5000                       │
+│  - CORS Middleware (app.use(cors()))                    │
+│  - Custom Request Logger Middleware                     │
+│  - Content-Type JSON Validator                          │
+│  - Centralized Error Handler Pipeline                   │
+│  - Level 3 HATEOAS Hypermedia Link Generator            │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+                 Mongoose  │  Queries & Mutations
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│               MongoDB Database                          │
+│             mongodb://127.0.0.1:27017/taskdb            │
+│  - Tasks Collection (Schema, Enums, Timestamps)         │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📡 API Reference & Endpoints
+## 🚀 Key Features Implemented
 
-| Method | Endpoint | Description | Status Code |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/tasks` | Retrieve paginated tasks + collection links | `200 OK` |
-| `GET` | `/tasks/:id` | Retrieve single task document + HATEOAS `_links` | `200 OK` / `404 Not Found` |
-| `POST` | `/tasks` | Create task + return created task & links | `201 Created` / `400 Bad Request` |
-| `PUT` | `/tasks/:id` | Fully update task & regenerate links | `200 OK` / `400 Bad Request` / `404 Not Found` |
-| `PATCH` | `/tasks/:id` | Partially update task / status transition | `200 OK` / `400 Bad Request` / `404 Not Found` |
-| `DELETE` | `/tasks/:id` | Remove task by ID | `200 OK` / `404 Not Found` |
-| `GET` | `/tasks/test-error` | Trigger Global Error Handler | `500 Internal Server Error` |
+1. **Backend CORS Configuration**:
+   - `cors` middleware installed and configured to allow cross-origin requests from the React dev server (`http://localhost:5173`).
+2. **Centralized API Client (`src/services/api.js`)**:
+   - Clean async/await wrappers with standard error handling for `getTasks`, `createTask`, `updateTask`, `patchTask`, and `deleteTask`.
+3. **Full End-to-End CRUD Operations**:
+   - **Create**: Task creation form with title, description, priority, due date.
+   - **Read**: Fetching tasks directly from MongoDB on component mount and search/filter.
+   - **Update (PUT)**: Modal dialog for editing title, description, status, priority, due date.
+   - **Status Toggle (PATCH)**: Quick status progression (Pending ➔ In Progress ➔ Completed).
+   - **Delete (DELETE)**: Task deletion with modal confirmation dialog.
+4. **Optimistic UI Updates**:
+   - Instant visual update upon creating tasks and toggling task statuses with automatic rollback if the backend write fails.
+5. **Toast Notification System**:
+   - Non-blocking toast notifications providing feedback for every API write/read interaction.
+6. **Persistence Verified**:
+   - Full persistence in MongoDB confirmed across page reloads.
 
 ---
 
-## 🚀 Getting Started & Execution
+## 💻 Tech Stack
+
+- **Frontend**: React 18, Vite, Lucide Icons, Modern Vanilla CSS (Glassmorphism design system).
+- **Backend**: Node.js, Express.js, CORS, Dotenv.
+- **Database**: MongoDB, Mongoose ODM.
+- **Testing**: Node.js HTTP Test Suite, MongoMemoryServer.
+
+---
+
+## 📦 Project Structure
+
+```text
+PR4/
+├── client/                     # React Frontend Application (Vite)
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── ConfirmDialog.jsx     # Delete confirmation modal
+│   │   │   ├── HateoasModal.jsx      # Hypermedia JSON inspector
+│   │   │   ├── Navbar.jsx            # Top navbar & backend status
+│   │   │   ├── StatsBar.jsx          # Live metrics cards
+│   │   │   ├── TaskCard.jsx          # Interactive task item card
+│   │   │   ├── TaskForm.jsx          # New task creation form
+│   │   │   ├── TaskModal.jsx         # Edit task modal (PUT)
+│   │   │   └── ToastContainer.jsx    # Toast notification system
+│   │   ├── services/
+│   │   │   └── api.js                # Centralized API service layer
+│   │   ├── App.jsx                   # Root application state coordinator
+│   │   ├── index.css                 # Modern CSS design system
+│   │   └── main.jsx                  # React entrypoint
+│   ├── index.html
+│   ├── package.json
+│   └── vite.config.js          # Vite config on port 5173
+│
+├── src/                        # Express Backend Application
+│   ├── middleware/             # Logger, Content-Type, NotFound, ErrorHandler
+│   ├── models/Task.js          # Mongoose Schema & validation hooks
+│   ├── routes/taskRoutes.js    # Express CRUD & HATEOAS route handlers
+│   └── utils/taskLinks.js      # Level 3 HATEOAS link generator
+│
+├── server.js                   # Express server entry point (port 5000)
+├── test-api.js                 # 26-Point Automated test suite
+├── package.json                # Root package with monorepo scripts
+└── README.md
+```
+
+---
+
+## 🛠️ How to Run Locally
 
 ### 1. Install Dependencies
+Install dependencies for both backend and frontend:
 ```bash
+# Install root backend dependencies
 npm install
+
+# Install frontend client dependencies
+cd client
+npm install
+cd ..
 ```
 
-### 2. Run Server
+### 2. Run Both Backend & Frontend Simultaneously
+You can start both servers together using the monorepo script:
 ```bash
-npm start
+npm run dev
+```
+- **React Frontend**: `http://localhost:5173`
+- **Express Backend**: `http://localhost:5000`
+
+### Alternatively, Run in Separate Terminals:
+
+**Terminal 1 (Backend):**
+```bash
+npm run server
+# Express backend starts on http://localhost:5000
 ```
 
-Access the Interactive HATEOAS Dashboard in your browser: `http://localhost:3000` (or `PORT` environment variable).
+**Terminal 2 (Frontend):**
+```bash
+npm run client
+# React frontend starts on http://localhost:5173
+```
 
-### 3. Run Automated Tests
-Execute the 26-point automated test suite:
+---
+
+## 🧪 Automated Testing
+Run the backend test suite to verify all API endpoints and validations:
 ```bash
 npm test
 ```
+
+---
+
+## ❓ Key Concept Analysis (Viva & Evaluation)
+
+### 1. What changes are required on the backend (CORS) to allow the React dev server to call the Express API?
+- Browsers enforce the **Same-Origin Policy (SOP)** which restricts web applications running on one origin (e.g. `http://localhost:5173`) from making fetch requests to a different origin (e.g. `http://localhost:5000`).
+- By installing `cors` and adding `app.use(cors())` before route definitions, the Express backend automatically includes the `Access-Control-Allow-Origin: *` (or specified origin) header and responds to HTTP `OPTIONS` preflight requests, allowing the React frontend to communicate with the API.
+
+### 2. Why should the UI re-fetch or update local state after a successful POST/PUT/DELETE rather than assuming success silently?
+- The backend server generates server-side data such as MongoDB ObjectIDs (`_id`), automatic timestamps (`createdAt`, `updatedAt`), default values, trimmed strings, and validated enums.
+- Updating local state based on the server's response guarantees that the frontend and database stay perfectly synchronized and prevents showing phantom or mismatched data.
+
+### 3. What is the risk of not handling errors on write operations (POST/PUT/DELETE) the same way as read operations (GET)?
+- If write errors are ignored, the UI may show a task as created, edited, or deleted when the database rejected the request (e.g., schema validation failure, network disconnect, or duplicate key).
+- When the user refreshes the page, their changes will vanish, resulting in severe data loss confusion. Proper write error handling alerts the user immediately and rolls back any optimistic UI changes.
+
+---
+
+## 📄 License
+MIT

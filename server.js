@@ -1,5 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const cors = require('cors');
 require('dotenv').config();
 
 // Middleware
@@ -14,6 +15,13 @@ const taskRoutes = require('./src/routes/taskRoutes');
 const app = express();
 
 // ── Core middleware ──────────────────────────────────────────────────────────
+// Enable CORS for frontend clients (React Vite on 5173, etc.)
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 app.use(loggerMiddleware);
 app.use(contentTypeMiddleware);
@@ -22,12 +30,13 @@ app.use(contentTypeMiddleware);
 app.use(express.static('public'));
 
 // ── Connect to MongoDB ───────────────────────────────────────────────────────
-mongoose.connect(process.env.MONGO_URI)
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/taskdb';
+mongoose.connect(MONGO_URI)
   .then(() => {
-    console.log('MongoDB connected');
+    console.log(`MongoDB connected successfully to ${MONGO_URI}`);
   })
   .catch((err) => {
-    console.error('MongoDB connection error:', err);
+    console.error('MongoDB connection error:', err.message);
   });
 
 // ── Routes ───────────────────────────────────────────────────────────────────
@@ -39,9 +48,9 @@ app.use(errorHandler);
 
 // ── Start server (Only when executed directly, not when required in tests) ──
 if (require.main === module) {
-  const PORT = process.env.PORT || 3000;
+  const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`🚀 Express Backend running on http://localhost:${PORT}`);
   });
 }
 
