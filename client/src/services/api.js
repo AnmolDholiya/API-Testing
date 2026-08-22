@@ -1,22 +1,68 @@
 /**
- * Central API Service Layer for Practical 6 Full-Stack Integration
- * Connects React UI (port 5173) to Node/Express/MongoDB Backend (port 5000 / 3000)
+ * Central API Service Layer for Practical 6 & Practical 7
+ * Handles:
+ * - JWT Token Storage & Automatic Authorization Header Injection
+ * - Auto-Port Fallback (port 5000 / 3000)
+ * - User Authentication (register, login, getMe, logout)
+ * - Task CRUD and Level 3 HATEOAS Execution
  */
 
 export let BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const FALLBACK_PORTS = ['http://localhost:5000', 'http://localhost:3000'];
+const TOKEN_STORAGE_KEY = 'adwf_auth_token';
+const USER_STORAGE_KEY = 'adwf_auth_user';
 
 export function setBaseUrl(newUrl) {
   BASE_URL = newUrl;
 }
 
 /**
- * Standardized Fetch Helper with JSON parsing and auto-port recovery
+ * Token & User Local Storage Management
+ */
+export function getToken() {
+  return localStorage.getItem(TOKEN_STORAGE_KEY) || '';
+}
+
+export function setToken(token) {
+  if (token) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
+}
+
+export function getStoredUser() {
+  try {
+    const raw = localStorage.getItem(USER_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredUser(user) {
+  if (user) {
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+  } else {
+    localStorage.removeItem(USER_STORAGE_KEY);
+  }
+}
+
+export function logout() {
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+  localStorage.removeItem(USER_STORAGE_KEY);
+}
+
+/**
+ * Standardized Fetch Helper with JWT Header Injection and auto-port recovery
  */
 async function request(endpoint, options = {}) {
+  const token = getToken();
+
   const headers = {
     'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers || {})
   };
 
@@ -25,13 +71,21 @@ async function request(endpoint, options = {}) {
     headers
   };
 
-  // Helper to attempt fetch at a specific base URL
   const attemptFetch = async (baseUrl) => {
     const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
     const response = await fetch(url, config);
     const data = await response.json().catch(() => null);
 
     if (!response.ok) {
+      // 401 Unauthorized handling
+      if (response.status === 401) {
+        const errorMsg = (data && (data.error || data.message)) || 'Unauthorized - Please login';
+        const error = new Error(errorMsg);
+        error.status = 401;
+        error.isAuthError = true;
+        throw error;
+      }
+
       let errorMessage = (data && (data.error || data.message)) || `HTTP ${response.status}: ${response.statusText}`;
       if (data && Array.isArray(data.details)) {
         errorMessage = `${errorMessage} - ${data.details.map(d => `${d.field}: ${d.message}`).join(', ')}`;
@@ -49,26 +103,66 @@ async function request(endpoint, options = {}) {
     return await attemptFetch(BASE_URL);
   } catch (err) {
     if (err.name === 'TypeError' && err.message.includes('fetch')) {
-      // If primary port failed, try alternate known port
       for (const altUrl of FALLBACK_PORTS) {
         if (altUrl !== BASE_URL) {
           try {
             const data = await attemptFetch(altUrl);
-            BASE_URL = altUrl; // Successfully auto-discovered active port
+            BASE_URL = altUrl;
             return data;
           } catch {
-            // continue checking
+            // continue fallback
           }
         }
       }
-      throw new Error(`Cannot connect to backend server at ${BASE_URL}. Ensure Express backend is running (npm run server) and MongoDB is running.`);
+      throw new Error(`Cannot connect to backend server at ${BASE_URL}. Ensure Express server is running on port 5000 and MongoDB is connected.`);
     }
     throw err;
   }
 }
 
+// ── Authentication Endpoints ──────────────────────────────────────────────────
+
 /**
- * Get all tasks with query parameters (search, status, priority, page, limit)
+ * User Registration (POST /auth/register)
+ */
+export async function registerUser({ name, email, password }) {
+  const res = await request('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ name, email, password })
+  });
+  if (res && res.token) {
+    setToken(res.token);
+    setStoredUser(res.user);
+  }
+  return res;
+}
+
+/**
+ * User Login (POST /auth/login)
+ */
+export async function loginUser({ email, password }) {
+  const res = await request('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  });
+  if (res && res.token) {
+    setToken(res.token);
+    setStoredUser(res.user);
+  }
+  return res;
+}
+
+/**
+ * Get Authenticated User Profile (GET /auth/me)
+ */
+export async function getMe() {
+  return await request('/auth/me', { method: 'GET' });
+}
+
+// ── Task Management Endpoints (Protected by JWT) ──────────────────────────────
+
+/**
+ * Get all tasks with query parameters
  */
 export async function getTasks(params = {}) {
   const query = new URLSearchParams();
@@ -146,8 +240,9 @@ export async function executeHypermediaAction(href, method = 'GET', body = null)
 export async function checkBackendHealth() {
   for (const url of [BASE_URL, ...FALLBACK_PORTS.filter(u => u !== BASE_URL)]) {
     try {
-      const res = await fetch(`${url}/tasks?limit=1`, { method: 'GET' });
-      if (res.ok) {
+      const res = await fetch(`${url}/tasks/test-error`, { method: 'GET' });
+      // If server responds with 500 from error handler, it's alive!
+      if (res.status === 500 || res.status === 200 || res.status === 401) {
         BASE_URL = url;
         return { ok: true, status: res.status, url };
       }

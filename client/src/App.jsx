@@ -7,6 +7,7 @@ import TaskModal from './components/TaskModal';
 import ConfirmDialog from './components/ConfirmDialog';
 import ToastContainer from './components/ToastContainer';
 import HateoasModal from './components/HateoasModal';
+import AuthModal from './components/AuthModal';
 import { 
   getTasks, 
   createTask, 
@@ -14,6 +15,12 @@ import {
   patchTask, 
   deleteTask, 
   checkBackendHealth,
+  registerUser,
+  loginUser,
+  getMe,
+  logout,
+  getToken,
+  getStoredUser,
   BASE_URL
 } from './services/api';
 import { 
@@ -31,10 +38,17 @@ import {
   PlusCircle,
   Clock,
   Play,
-  CheckCircle2
+  CheckCircle2,
+  Lock,
+  LogIn,
+  KeyRound
 } from 'lucide-react';
 
 export default function App() {
+  // Authentication State
+  const [currentUser, setCurrentUser] = useState(getStoredUser());
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
   // Main Data States
   const [tasks, setTasks] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -42,7 +56,7 @@ export default function App() {
   const [totalPages, setTotalPages] = useState(1);
 
   // Layout & View States
-  const [viewMode, setViewMode] = useState('board'); // 'board' (Kanban) or 'list'
+  const [viewMode, setViewMode] = useState('board'); // 'board' or 'list'
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [newTaskInitialStatus, setNewTaskInitialStatus] = useState('pending');
 
@@ -80,6 +94,13 @@ export default function App() {
 
   // ── Fetch Tasks from MongoDB Backend ──────────────────────────────────────
   const fetchTasksList = useCallback(async (currentPage = page, search = searchQuery, status = statusFilter, priority = priorityFilter) => {
+    const token = getToken();
+    if (!token) {
+      setTasks([]);
+      setTotalCount(0);
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await getTasks({
@@ -99,16 +120,36 @@ export default function App() {
       }
     } catch (err) {
       console.error('Fetch tasks error:', err);
-      setBackendConnected(false);
-      addToast('error', err.message, 'Failed to fetch tasks');
+      if (err.status === 401 || err.isAuthError) {
+        logout();
+        setCurrentUser(null);
+        addToast('error', 'Session expired or unauthenticated. Please sign in.', 'Authentication Required');
+      } else {
+        addToast('error', err.message, 'Failed to fetch tasks');
+      }
     } finally {
       setLoading(false);
     }
   }, [page, searchQuery, statusFilter, priorityFilter, viewMode]);
 
-  // Initial mount fetch & health check
+  // Initial mount: Verify stored session and fetch tasks
   useEffect(() => {
-    fetchTasksList();
+    const initAuth = async () => {
+      const token = getToken();
+      if (token) {
+        try {
+          const res = await getMe();
+          if (res && res.user) {
+            setCurrentUser(res.user);
+            fetchTasksList();
+          }
+        } catch {
+          logout();
+          setCurrentUser(null);
+        }
+      }
+    };
+    initAuth();
   }, [fetchTasksList]);
 
   // Health ping interval
@@ -121,8 +162,39 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // ── Authentication Handlers ────────────────────────────────────────────────
+  const handleAuthSuccess = async (actionType, payload) => {
+    try {
+      const res = actionType === 'login' 
+        ? await loginUser(payload)
+        : await registerUser(payload);
+
+      if (res && res.user) {
+        setCurrentUser(res.user);
+        addToast('success', `Welcome, ${res.user.name || res.user.email}!`, 'Signed In (JWT Active)');
+        fetchTasksList(1);
+      }
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+    setCurrentUser(null);
+    setTasks([]);
+    setTotalCount(0);
+    addToast('info', 'You have been signed out. Tokens cleared.', 'Signed Out');
+  };
+
   // ── Handle Task Creation (POST /tasks) with Optimistic UI Update ──────────
   const handleCreateTask = async (taskPayload) => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      addToast('warning', 'Please sign in to create tasks with JWT authentication.', 'Authentication Required');
+      return;
+    }
+
     setCreateLoading(true);
     const tempId = `temp-${Date.now()}`;
     const optimisticTask = {
@@ -132,7 +204,6 @@ export default function App() {
       isOptimistic: true
     };
 
-    // Optimistically add to state
     setTasks((prev) => [optimisticTask, ...prev]);
 
     try {
@@ -147,6 +218,9 @@ export default function App() {
       }
     } catch (err) {
       setTasks((prev) => prev.filter((t) => t._id !== tempId));
+      if (err.status === 401) {
+        setIsAuthModalOpen(true);
+      }
       addToast('error', err.message, 'Create Task Failed');
       throw err;
     } finally {
@@ -156,6 +230,11 @@ export default function App() {
 
   // ── Handle Status Toggle / Progression (PATCH /tasks/:id) ─────────────────
   const handleToggleStatus = async (task, targetStatus = null) => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
     const taskId = task._id || task.id;
     const currentStatus = task.status || (task.completed ? 'completed' : 'pending');
 
@@ -166,7 +245,6 @@ export default function App() {
 
     const previousTasks = [...tasks];
 
-    // Optimistically update local UI state immediately
     setTasks((prev) =>
       prev.map((t) =>
         (t._id || t.id) === taskId
@@ -240,6 +318,11 @@ export default function App() {
   const completedTasks = tasks.filter(t => (t.status === 'completed' || t.completed));
 
   const handleOpenCreateModal = (status = 'pending') => {
+    if (!currentUser) {
+      setIsAuthModalOpen(true);
+      addToast('warning', 'Please sign in to create tasks.', 'Authentication Required');
+      return;
+    }
     setNewTaskInitialStatus(status);
     setIsNewTaskModalOpen(true);
   };
@@ -251,6 +334,9 @@ export default function App() {
         backendConnected={backendConnected}
         onRefresh={() => fetchTasksList(page)}
         onOpenNewTask={() => handleOpenCreateModal('pending')}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        currentUser={currentUser}
+        onLogout={handleLogout}
         loading={loading}
       />
 
@@ -284,6 +370,55 @@ export default function App() {
               <span>Retry Connection</span>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Unauthenticated Banner */}
+      {!currentUser && (
+        <div style={{
+          background: 'linear-gradient(135deg, #eef2ff, #f8fafc)',
+          border: '1.5px solid #c7d2fe',
+          borderRadius: '12px',
+          padding: '1.25rem 1.5rem',
+          marginBottom: '1.75rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '1rem',
+          boxShadow: 'var(--shadow-card)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.9rem' }}>
+            <div style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '10px',
+              background: 'var(--accent-primary-gradient)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#ffffff',
+              boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)'
+            }}>
+              <KeyRound size={22} />
+            </div>
+            <div>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-main)', marginBottom: '0.2rem' }}>
+                Practical 7: JWT Authentication & Protected Middleware Active
+              </h3>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)' }}>
+                Task routes are protected by Express authentication middleware. Sign in or register to issue a JWT token.
+              </p>
+            </div>
+          </div>
+          <button
+            className="btn btn-primary"
+            onClick={() => setIsAuthModalOpen(true)}
+            style={{ padding: '0.6rem 1.25rem' }}
+          >
+            <LogIn size={16} />
+            <span>Sign In / Register</span>
+          </button>
         </div>
       )}
 
@@ -418,7 +553,7 @@ export default function App() {
               {pendingTasks.length === 0 ? (
                 <div className="column-empty">
                   <Clock size={24} style={{ color: '#d97706', marginBottom: '0.4rem' }} />
-                  <p>No pending tasks</p>
+                  <p>{currentUser ? 'No pending tasks' : 'Sign in to view tasks'}</p>
                   <button
                     className="btn btn-secondary"
                     style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', marginTop: '0.6rem' }}
@@ -570,7 +705,9 @@ export default function App() {
                   No tasks found in MongoDB
                 </h4>
                 <p style={{ fontSize: '0.85rem' }}>
-                  {searchQuery || statusFilter || priorityFilter
+                  {!currentUser
+                    ? 'Please sign in with JWT authentication to view and create tasks.'
+                    : searchQuery || statusFilter || priorityFilter
                     ? 'No tasks match the active search and filter criteria.'
                     : 'Click "+ Add Task" to create your first task!'}
                 </p>
@@ -648,6 +785,13 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ── AUTHENTICATION MODAL (JWT Sign In / Register) ────────────────── */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
+      />
 
       {/* Edit Task Modal (PUT) */}
       <TaskModal

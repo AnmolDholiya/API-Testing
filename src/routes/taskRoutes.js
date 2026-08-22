@@ -2,12 +2,30 @@ const express = require('express');
 const router = express.Router();
 const Task = require('../models/Task');
 const validateTaskId = require('../middleware/idValidator');
+const authMiddleware = require('../middleware/auth');
+const validateTask = require('../middleware/validateTask');
 const { generateTaskLinks, generateCollectionLinks } = require('../utils/taskLinks');
+
+/**
+ * @route   GET /tasks/test-error
+ * @desc    Test route to deliberately trigger global error handling middleware
+ * @status  500 Internal Server Error
+ */
+router.get('/test-error', (req, res, next) => {
+  try {
+    throw new Error('Deliberate simulation error to demonstrate Global Error Handler pipeline!');
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Protect all task routes with JWT Authentication Middleware ───────────────
+router.use(authMiddleware);
 
 /**
  * @route   GET /tasks
  * @desc    Get all tasks (supports query filters: search, status, completed, priority, page, limit)
- * @status  200 OK
+ * @status  200 OK, 401 Unauthorized
  */
 router.get('/', async (req, res, next) => {
   try {
@@ -73,22 +91,9 @@ router.get('/', async (req, res, next) => {
 });
 
 /**
- * @route   GET /tasks/test-error
- * @desc    Test route to deliberately trigger global error handling middleware
- * @status  500 Internal Server Error
- */
-router.get('/test-error', (req, res, next) => {
-  try {
-    throw new Error('Deliberate simulation error to demonstrate Global Error Handler pipeline!');
-  } catch (err) {
-    next(err);
-  }
-});
-
-/**
  * @route   GET /tasks/:id
  * @desc    Get single task by ObjectId with HATEOAS links
- * @status  200 OK or 404 Not Found
+ * @status  200 OK, 400 Bad Request, 401 Unauthorized, or 404 Not Found
  */
 router.get('/:id', validateTaskId, async (req, res, next) => {
   try {
@@ -119,10 +124,10 @@ router.get('/:id', validateTaskId, async (req, res, next) => {
 
 /**
  * @route   POST /tasks
- * @desc    Create a new task in MongoDB with HATEOAS response
- * @status  201 Created or 400 Bad Request
+ * @desc    Create a new task with validation middleware & HATEOAS response
+ * @status  201 Created, 400 Bad Request, 401 Unauthorized
  */
-router.post('/', async (req, res, next) => {
+router.post('/', validateTask, async (req, res, next) => {
   try {
     const { title, description, status, completed, priority, dueDate } = req.body;
 
@@ -153,10 +158,10 @@ router.post('/', async (req, res, next) => {
 
 /**
  * @route   PUT /tasks/:id
- * @desc    Fully update existing task by ObjectId with schema validation & regenerated HATEOAS links
- * @status  200 OK, 400 Bad Request, or 404 Not Found
+ * @desc    Fully update existing task by ObjectId with validation middleware & regenerated HATEOAS links
+ * @status  200 OK, 400 Bad Request, 401 Unauthorized, or 404 Not Found
  */
-router.put('/:id', validateTaskId, async (req, res, next) => {
+router.put('/:id', validateTaskId, validateTask, async (req, res, next) => {
   try {
     const updateData = { ...req.body };
 
@@ -200,10 +205,10 @@ router.put('/:id', validateTaskId, async (req, res, next) => {
 
 /**
  * @route   PATCH /tasks/:id
- * @desc    Partially update task by ObjectId with regenerated status-aware HATEOAS links
- * @status  200 OK, 400 Bad Request, or 404 Not Found
+ * @desc    Partially update task by ObjectId with validation middleware & status-aware HATEOAS links
+ * @status  200 OK, 400 Bad Request, 401 Unauthorized, or 404 Not Found
  */
-router.patch('/:id', validateTaskId, async (req, res, next) => {
+router.patch('/:id', validateTaskId, validateTask, async (req, res, next) => {
   try {
     const updateData = { ...req.body };
 
@@ -248,7 +253,7 @@ router.patch('/:id', validateTaskId, async (req, res, next) => {
 /**
  * @route   DELETE /tasks/:id
  * @desc    Delete task by ObjectId
- * @status  200 OK or 404 Not Found
+ * @status  200 OK, 400 Bad Request, 401 Unauthorized, or 404 Not Found
  */
 router.delete('/:id', validateTaskId, async (req, res, next) => {
   try {

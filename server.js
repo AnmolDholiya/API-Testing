@@ -10,10 +10,10 @@ const notFoundHandler = require('./src/middleware/notFound');
 const errorHandler = require('./src/middleware/errorHandler');
 
 // Routes
+const authRoutes = require('./src/routes/authRoutes');
 const taskRoutes = require('./src/routes/taskRoutes');
 
 const app = express();
-
 
 app.use(cors({
   origin: '*',
@@ -39,6 +39,8 @@ mongoose.connect(MONGO_URI)
   });
 
 // ── Routes ───────────────────────────────────────────────────────────────────
+app.use('/auth', authRoutes);
+app.use('/', authRoutes); // Direct support for /register, /login, /me
 app.use('/tasks', taskRoutes);
 
 // ── 404 & Global Error Handler (must be LAST) ────────────────────────────────

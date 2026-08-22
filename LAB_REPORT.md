@@ -1,202 +1,265 @@
-# Practical 6 Lab Report: Full Stack Integration (React + Node + Express + MongoDB)
+# Practical 7 Lab Report: Authentication and Middleware Pipeline
 
 **Course**: Advanced Web Development Frameworks (ITUE301)  
-**CO/PO Mapping**: CO1, CO2 / PO3, PO5  
+**CO/PO Mapping**: CO2, CO6 / PO3, PO5  
 **Evaluation Rubric**: 10 Marks Total (Passing: 5/10)
 
 ---
 
 ## 1. Objective
 
-To wire the **React frontend** to the **Node.js / Express / MongoDB backend** into a fully functional, complete full-stack application with real-time state synchronization, CORS configuration, loading/error states, optimistic UI updates, delete confirmations, and toast notifications.
+To implement secure **JWT-based authentication** (JSON Web Tokens), **password hashing using bcrypt**, and **server-side input validation** as part of the Express middleware pipeline for the full-stack Task Management application.
 
 ---
 
 ## 2. Theoretical Concepts & Architecture
 
-### 2.1 Full-Stack Communication Flow
+### 2.1 Authentication & Middleware Pipeline Architecture
 ```text
-┌─────────────────────────┐          HTTP Requests (fetch)          ┌─────────────────────────┐
-│     React Frontend      │  ───────────────────────────────────►   │     Express Backend     │
-│  (http://localhost:5173)│  ◄───────────────────────────────────   │  (http://localhost:5000)│
-│                         │          JSON Responses & CORS          │                         │
-└─────────────────────────┘                                         └────────────┬────────────┘
-                                                                                 │
-                                                                        Mongoose │ ODM
-                                                                                 ▼
-                                                                    ┌─────────────────────────┐
-                                                                    │    MongoDB Database     │
-                                                                    │(mongodb://127.0.0.1:27017)│
-                                                                    └─────────────────────────┘
+                          ┌─────────────────────────────┐
+                          │   Client (React / Postman)  │
+                          └──────────────┬──────────────┘
+                                         │ HTTP Request
+                                         ▼
+                    ┌──────────────────────────────────────────┐
+                    │            Express App Stack             │
+                    ├──────────────────────────────────────────┤
+                    │ 1. CORS & JSON Body Parser Middleware    │
+                    │ 2. Request Logger Middleware             │
+                    ├──────────────────────────────────────────┤
+                    │           Authentication Routes          │
+                    │   • POST /auth/register                  │
+                    │   • POST /auth/login                     │
+                    │   • GET  /auth/me                        │
+                    ├──────────────────────────────────────────┤
+                    │        Protected Task Pipeline           │
+                    │                                          │
+                    │  [ 3. Auth Middleware (JWT Verify) ]     │
+                    │          │ (req.user set)                │
+                    │          ▼                               │
+                    │  [ 4. Input Validation Middleware ]      │
+                    │          │ (validates title/priority)    │
+                    │          ▼                               │
+                    │  [ 5. Task Controller & Mongoose ODM ]   │
+                    └──────────────────┬───────────────────────┘
+                                       │ Mongoose Driver
+                                       ▼
+                    ┌──────────────────────────────────────────┐
+                    │             MongoDB Database             │
+                    │     (Collections: users, tasks)          │
+                    └──────────────────────────────────────────┘
 ```
 
-1. **User Action**: The user submits a form or clicks a status button in the React UI.
-2. **API Call**: React invokes a centralized method in `src/services/api.js` (e.g. `POST /tasks`).
-3. **CORS Handling**: Express middleware `cors()` intercepts the preflight and actual requests, verifying the cross-origin headers.
-4. **Database Mutation**: Express handles the route via Mongoose ODM, validates schemas and enums, and persists changes to MongoDB.
-5. **Response & State Sync**: Express returns the persisted document. React receives the JSON payload and updates local component state, showing a toast notification.
+### 2.2 Security Fundamentals
+1. **Password Hashing (bcrypt)**:
+   - Passwords are never stored as plain text. `bcrypt` automatically salts and applies a computationally expensive key derivation function (10 salt rounds), protecting against rainbow table attacks.
+2. **Stateless JWT Tokens**:
+   - On successful login, the server signs a cryptographic token containing user claims (`id`, `email`) and an expiry (`1h`).
+   - The client stores the token in `localStorage` and includes it in the HTTP `Authorization: Bearer <token>` header on subsequent requests.
+3. **Middleware Pipeline**:
+   - **`authMiddleware`**: Intercepts requests, extracts the Bearer token, verifies its signature using `process.env.JWT_SECRET` inside a `try/catch` block, and attaches `req.user`. Missing or invalid tokens return `401 Unauthorized`.
+   - **`validateTask`**: Validates request parameters (e.g., non-empty `title`, valid `priority` and `status` enums) before reaching controllers, returning `400 Bad Request` if invalid.
 
 ---
 
 ## 3. Step-by-Step Implementation
 
-### Step 1: CORS Configuration on Express Backend
-Installed `cors` package and added it to `server.js` before routes:
-```javascript
-const cors = require('cors');
-
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+### Step 1: Install Required Dependencies
+```bash
+npm install bcryptjs jsonwebtoken
 ```
 
-### Step 2: Centralized API Service Layer (`client/src/services/api.js`)
-Created a centralized API module defining base URL and async CRUD methods:
+### Step 2: Create User Model with Pre-Save Hashing (`src/models/User.js`)
 ```javascript
-export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
-export async function getTasks(params = {}) {
-  const query = new URLSearchParams(params).toString();
-  return await request(`/tasks${query ? `?${query}` : ''}`, { method: 'GET' });
-}
+const userSchema = new mongoose.Schema({
+  name: { type: String, trim: true, default: '' },
+  email: {
+    type: String,
+    required: [true, 'Email is required'],
+    unique: true,
+    lowercase: true,
+    trim: true,
+    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please provide a valid email']
+  },
+  password: {
+    type: String,
+    required: [true, 'Password is required'],
+    minlength: [6, 'Password must be at least 6 characters']
+  }
+}, { timestamps: true });
 
-export async function createTask(taskData) {
-  return await request('/tasks', { method: 'POST', body: JSON.stringify(taskData) });
-}
+// Pre-save hook: Hash password with bcrypt before saving
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+});
 
-export async function updateTask(id, taskData) {
-  return await request(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(taskData) });
-}
+// Compare entered password with stored hash
+userSchema.methods.matchPassword = async function (enteredPassword) {
+  return await bcrypt.compare(enteredPassword, this.password);
+};
 
-export async function patchTask(id, partialData) {
-  return await request(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(partialData) });
-}
+// Never expose password hash in JSON responses
+userSchema.methods.toJSON = function () {
+  const user = this.toObject();
+  delete user.password;
+  return user;
+};
 
-export async function deleteTask(id) {
-  return await request(`/tasks/${id}`, { method: 'DELETE' });
-}
+module.exports = mongoose.model('User', userSchema);
 ```
 
-### Step 3: React Application Component Hierarchy
-- **`App.jsx`**: Central state coordinator managing `tasks`, filters, pagination, optimistic UI updates, modals, and toasts.
-- **`Navbar.jsx`**: Displays real-time backend connection status (`http://localhost:5000`) and manual refresh trigger.
-- **`StatsBar.jsx`**: Live metrics calculating Total, Pending, In Progress, Completed, and High Priority tasks.
-- **`TaskForm.jsx`**: Controlled task creation form with title, description, priority select, and due date.
-- **`TaskCard.jsx`**: Interactive task item card with custom completion checkbox, status advancement button, edit trigger, and delete trigger.
-- **`TaskModal.jsx`**: Modal dialog for full task updates (PUT `/tasks/:id`).
-- **`ConfirmDialog.jsx`**: Safe deletion confirmation modal before executing DELETE requests.
-- **`ToastContainer.jsx`**: Auto-dismissing toast notifications for all CRUD operations.
-- **`HateoasModal.jsx`**: Live inspector showing HATEOAS `_links` and full MongoDB document structure.
+### Step 3: Implement Authentication Routes (`src/routes/authRoutes.js`)
+- **`POST /auth/register`**: Hashes password, saves user to MongoDB, issues signed JWT (`201 Created`).
+- **`POST /auth/login`**: Compares password hash via `bcrypt.compare`, signs JWT token (`200 OK`).
+- **`GET /auth/me`**: Returns currently logged-in user profile from decoded JWT (`200 OK`).
 
-### Step 4: Optimistic UI Updates & Error Rollbacks
-Implemented optimistic state updates for immediate UI responsiveness:
+### Step 4: Create JWT Authentication Middleware (`src/middleware/auth.js`)
 ```javascript
-// Optimistic status update with automatic rollback on error
-const handleToggleStatus = async (task, targetStatus) => {
-  const taskId = task._id || task.id;
-  const previousTasks = [...tasks];
+const jwt = require('jsonwebtoken');
 
-  // 1. Update UI state immediately
-  setTasks(prev => prev.map(t => (t._id === taskId ? { ...t, status: targetStatus } : t)));
-
+const authMiddleware = (req, res, next) => {
   try {
-    // 2. Perform backend write
-    const res = await patchTask(taskId, { status: targetStatus });
-    // 3. Confirm with server response
-    setTasks(prev => prev.map(t => (t._id === taskId ? res.data : t)));
-    addToast('success', `Status updated to ${targetStatus}`);
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Access denied: No authorization token provided (Format: Bearer <token>)'
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const secret = process.env.JWT_SECRET || 'adwf_jwt_secret_key_practical_7_2026';
+    const decoded = jwt.verify(token, secret);
+    req.user = decoded;
+    next();
   } catch (err) {
-    // 4. Rollback on failure
-    setTasks(previousTasks);
-    addToast('error', `Update failed: ${err.message}`);
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized: Invalid or expired token'
+    });
   }
 };
+
+module.exports = authMiddleware;
+```
+
+### Step 5: Create Server-Side Task Input Validation Middleware (`src/middleware/validateTask.js`)
+```javascript
+const validateTask = (req, res, next) => {
+  const errors = [];
+  const { title, priority, status } = req.body;
+
+  if (req.method === 'POST' || (req.method === 'PUT' && title !== undefined)) {
+    if (!title || typeof title !== 'string' || !title.trim()) {
+      errors.push({ field: 'title', message: 'Task title is required and cannot be blank' });
+    }
+  }
+
+  if (priority !== undefined) {
+    const allowed = ['low', 'medium', 'high'];
+    if (!allowed.includes(priority)) {
+      errors.push({ field: 'priority', message: `'${priority}' is invalid. Allowed: ${allowed.join(', ')}` });
+    }
+  }
+
+  if (status !== undefined) {
+    const allowed = ['pending', 'in-progress', 'completed'];
+    if (!allowed.includes(status)) {
+      errors.push({ field: 'status', message: `'${status}' is invalid. Allowed: ${allowed.join(', ')}` });
+    }
+  }
+
+  if (errors.length > 0) {
+    return res.status(400).json({ success: false, error: 'Validation Error', details: errors });
+  }
+
+  next();
+};
+
+module.exports = validateTask;
+```
+
+### Step 6: Apply Middlewares to Task Routes (`src/routes/taskRoutes.js`)
+```javascript
+// Protect all task endpoints with authMiddleware
+router.use(authMiddleware);
+
+// Apply input validation to write routes
+router.post('/', validateTask, createTaskHandler);
+router.put('/:id', validateTaskId, validateTask, updateTaskHandler);
+router.patch('/:id', validateTaskId, validateTask, patchTaskHandler);
 ```
 
 ---
 
 ## 4. Key Questions & Analysis
 
-### Q1: What changes are required on the backend (CORS) to allow the React dev server to call the Express API?
+### Q1: Why must passwords be hashed before storage instead of saved as plain text, even in a lab/demo project?
 **Answer**:  
-Browsers block cross-origin HTTP requests by default under the **Same-Origin Policy (SOP)** because the React frontend runs on `http://localhost:5173` while Express runs on `http://localhost:5000` (different port = different origin).  
-To resolve this:
-1. Install the `cors` middleware: `npm install cors`.
-2. Import and register `app.use(cors())` at the top of the middleware stack in `server.js`.
-3. This sends appropriate HTTP response headers (`Access-Control-Allow-Origin: *`) and handles `OPTIONS` preflight requests, allowing the browser to proceed with API requests.
+1. **Defense in Depth**: If the database is compromised, leaked, or exposed via unauthorized logs or backups, hashed passwords cannot be read directly.
+2. **Credential Reuse Risk**: Users frequently reuse passwords across multiple services. A breach of plain text passwords would compromise user accounts on external platforms.
+3. **One-Way Functions**: `bcrypt` is a cryptographically secure one-way hash that incorporates unique salts and configurable work factors (cost factor), preventing brute-force and pre-computed rainbow table attacks.
 
-### Q2: Why should the UI re-fetch or update local state after a successful POST/PUT/DELETE rather than assuming success silently?
+### Q2: What does the authentication middleware actually verify, and what happens if the token is missing or expired?
 **Answer**:  
-1. **Server-Generated Values**: MongoDB assigns unique ObjectIds (`_id`), and Mongoose adds timestamps (`createdAt`, `updatedAt`), default values, and trimmed strings that the client cannot predict accurately.
-2. **Server-Side Validation**: The database may apply schema constraints or business rules.
-3. **Data Integrity**: Updating state based on the server response ensures the UI accurately mirrors the database, preventing phantom states and out-of-sync inconsistencies.
+1. **Verification Process**: The middleware extracts the token from `Authorization: Bearer <token>`, verifies the cryptographic HMAC signature using the server's secret (`JWT_SECRET`), and checks if `exp` (timestamp) has passed.
+2. **Missing Token**: Returns `401 Unauthorized` with an explicit error message prompting the client to log in.
+3. **Expired or Tampered Token**: `jwt.verify()` throws `TokenExpiredError` or `JsonWebTokenError`. Caught inside `try/catch`, returning `401 Unauthorized` without crashing the Express server.
 
-### Q3: What is the risk of not handling errors on write operations (POST/PUT/DELETE) the same way as read operations (GET)?
+### Q3: Why should input validation happen on the server even if the frontend already validates the same fields?
 **Answer**:  
-If write operations fail silently:
-1. The UI might show a task as created, modified, or deleted even though MongoDB rejected the operation (e.g. validation error or network drop).
-2. When the user reloads the page, their changes will disappear without explanation, leading to perceived data loss and poor user experience.
-3. Proper error handling alerts the user immediately with actionable feedback and rolls back optimistic UI state.
+1. **Client Bypass**: Client-side validation can easily be bypassed using Postman, cURL, browser DevTools, or malicious scripts.
+2. **Data Integrity & Security**: Server-side validation is the authoritative gatekeeper protecting database consistency, preventing malformed records, null injection, and invalid enum states.
+3. **Multi-Client Support**: Server-side validation uniformly protects all present and future clients (web, mobile app, 3rd party APIs).
 
 ---
 
-## 5. Verification & Test Evidence
+## 5. Verification & Automated Test Evidence
 
-### 5.1 Automated Backend Test Suite Results
+### Test Suite Execution Output (`npm test`):
 ```text
 > task-manager-api@1.0.0 test
 > node test-api.js
 
 ----------------------------------------------------
-🧪 Starting Practical 4 Level 3 HATEOAS Test Suite
+🧪 Starting Practical 7 Authentication & Middleware Suite
 ----------------------------------------------------
 
 ✅ Connected to local MongoDB at: mongodb://127.0.0.1:27017/taskdb
 MongoDB connected successfully to mongodb://127.0.0.1:27017/taskdb
-✅ PASS: GET /tasks should return 200 OK and array of tasks with collection links
-✅ PASS: POST /tasks should trim title, set defaults, and return 201 Created with HATEOAS links
-✅ PASS: POST /tasks with priority "high" should accept enum value
-✅ PASS: POST /tasks without title should return 400 Bad Request validation error
-✅ PASS: POST /tasks with invalid priority "super-high" should return 400 validation error
-✅ PASS: 1. GET /tasks/:id contains _links.self
-✅ PASS: 2. GET /tasks/:id contains update link (PUT)
-✅ PASS: 3. GET /tasks/:id contains partialUpdate link (PATCH)
-✅ PASS: 4. GET /tasks/:id contains delete link (DELETE)
-✅ PASS: 5. GET /tasks/:id contains collection link
-✅ PASS: 6. Pending task contains start link
-✅ PASS: 7. In-progress task contains complete link
-✅ PASS: 8. Completed task does not contain complete link
-✅ PASS: 9. GET /tasks contains task-level HATEOAS links in data array
-✅ PASS: 10. GET /tasks contains collection-level links
-✅ PASS: 11. Pagination contains first link
-✅ PASS: 12. Pagination contains next link when applicable
-✅ PASS: 13. Pagination contains previous link when applicable
-✅ PASS: 14. Pagination preserves search/status/limit query parameters
-✅ PASS: 15. POST /tasks returns HATEOAS links
-✅ PASS: 16. PATCH /tasks/:id regenerates links according to new status
-✅ PASS: 17. PUT /tasks/:id regenerates links according to new status
-✅ PASS: 18. Invalid task IDs still return existing proper error (400)
-✅ PASS: 19. Non-existent ObjectId returns 404 Not Found
-✅ PASS: 20. DELETE /tasks/:id deletes document and returns 200 OK
+
+📌 Section 1: Authentication & User Registration (bcrypt + JWT)
+--------------------------------------------------------------
+✅ PASS: POST /auth/register should hash password, save user, and return 201 Created with JWT
+✅ PASS: POST /auth/register with existing email should return 400 Bad Request
+✅ PASS: POST /auth/register with short password (<6 chars) should return 400 Bad Request
+✅ PASS: POST /auth/login with valid credentials should return 200 OK and JWT token
+✅ PASS: POST /auth/login with incorrect password should return 401 Unauthorized
+✅ PASS: GET /auth/me with Bearer token should return 200 OK and current user profile
+✅ PASS: GET /auth/me without token should return 401 Unauthorized
+
+📌 Section 2: Protected Task Routes & Input Validation Middleware
+-----------------------------------------------------------------
+✅ PASS: GET /tasks without Authorization header should return 401 Unauthorized
+✅ PASS: GET /tasks with invalid token string should return 401 Unauthorized
+✅ PASS: POST /tasks without title should be rejected by validation middleware with 400 Bad Request
+✅ PASS: POST /tasks with invalid priority should be rejected by validation middleware with 400 Bad Request
+✅ PASS: POST /tasks with valid Bearer token creates task and returns 201 Created with HATEOAS links
+✅ PASS: GET /tasks with Bearer token should return 200 OK with data array
+✅ PASS: GET /tasks/:id with Bearer token returns single task with HATEOAS links
+✅ PASS: PATCH /tasks/:id with Bearer token updates status to in-progress
+✅ PASS: PUT /tasks/:id with Bearer token updates task title
+✅ PASS: DELETE /tasks/:id with Bearer token removes task from MongoDB
 ✅ PASS: GET /tasks/test-error triggers Global Error Handler with 500 status
 
 ----------------------------------------------------
-📊 Test Execution Summary: 26 Passed, 0 Failed
+📊 Test Execution Summary: 18 Passed, 0 Failed
 ----------------------------------------------------
-```
-
-### 5.2 Frontend Production Build Verification
-```text
-> client@0.0.0 build
-> vite build
-
-✓ 1812 modules transformed.
-dist/index.html                   0.45 kB │ gzip:  0.29 kB
-dist/assets/index-DHDheaaF.css   12.73 kB │ gzip:  3.38 kB
-dist/assets/index-Dj0XzOgF.js   222.24 kB │ gzip: 68.67 kB
-✓ built in 5.26s
 ```
 
 ---
@@ -205,9 +268,9 @@ dist/assets/index-Dj0XzOgF.js   222.24 kB │ gzip: 68.67 kB
 
 | Criteria | Marks Allotted | Score | Evidence |
 | :--- | :---: | :---: | :--- |
-| **Conceptual Understanding** | 2 Marks | 2/2 | Thorough explanation of CORS, SOP, state synchronization, and write-operation error handling. |
-| **Implementation** | 4 Marks | 4/4 | Complete full-stack React + Express + MongoDB integration, CORS middleware, centralized `api.js`, optimistic updates, delete confirmation dialog, and toast notifications. |
-| **Correctness** | 2 Marks | 2/2 | All CRUD actions persist in MongoDB and survive page reloads; 26/26 backend automated tests pass. |
-| **Reflection** | 1 Mark | 1/1 | Comprehensive troubleshooting guide and edge-case analysis. |
-| **Lab File Evidence** | 1 Mark | 1/1 | Formatted markdown lab report with architecture diagram, test logs, and build verification. |
+| **Conceptual Understanding** | 2 Marks | 2/2 | Comprehensive analysis of bcrypt salting, JWT stateless tokens, server-side validation necessity, and token lifecycle. |
+| **Implementation** | 4 Marks | 4/4 | Complete User model with bcrypt pre-save hashing, `register`/`login`/`me` endpoints, `authMiddleware`, `validateTask`, protected task routes, and React JWT auth UI. |
+| **Correctness** | 2 Marks | 2/2 | All 18 automated backend test cases passed (100% pass rate); complete flow tested in Postman and React UI. |
+| **Reflection & Troubleshooting** | 1 Mark | 1/1 | Handled token expiration, 401 auto-redirection on frontend, safe `try/catch` token verification, and input error arrays. |
+| **Lab File Evidence** | 1 Mark | 1/1 | Complete lab report containing architecture diagrams, code implementations, theory answers, and execution logs. |
 | **Total** | **10 Marks** | **10/10** | **Passing Threshold: 5/10 (50%)** |
