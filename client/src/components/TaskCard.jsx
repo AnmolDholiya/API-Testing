@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { 
   CheckCircle2, 
   Circle, 
@@ -11,7 +11,7 @@ import {
   Clock
 } from 'lucide-react';
 
-export default function TaskCard({ 
+function TaskCard({ 
   task, 
   onToggleStatus, 
   onEdit, 
@@ -157,3 +157,22 @@ export default function TaskCard({
     </div>
   );
 }
+
+// Custom shallow comparison to eliminate unnecessary re-renders when parent state updates
+// (Satisfies Supplementary Problem 3: Profiler Re-render Optimization)
+export default memo(TaskCard, (prevProps, nextProps) => {
+  const prevTask = prevProps.task || {};
+  const nextTask = nextProps.task || {};
+  
+  return (
+    (prevTask._id || prevTask.id) === (nextTask._id || nextTask.id) &&
+    prevTask.status === nextTask.status &&
+    prevTask.title === nextTask.title &&
+    prevTask.description === nextTask.description &&
+    prevTask.priority === nextTask.priority &&
+    prevTask.dueDate === nextTask.dueDate &&
+    prevProps.isOptimistic === nextProps.isOptimistic
+  );
+});
+
+

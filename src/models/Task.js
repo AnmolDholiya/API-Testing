@@ -68,4 +68,11 @@ taskSchema.pre('save', function () {
   }
 });
 
+// ── High-Performance MongoDB Database Indexes ─────────────────────────────────
+taskSchema.index({ createdAt: -1 });
+taskSchema.index({ status: 1, createdAt: -1 });
+taskSchema.index({ priority: 1, createdAt: -1 });
+taskSchema.index({ title: 'text', description: 'text' });
+
 module.exports = mongoose.model('Task', taskSchema);
+

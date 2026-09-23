@@ -1,6 +1,9 @@
 /**
- * Central API Service Layer for Practical 6 & Practical 7
- * Handles:
+ * Central API Service Layer for Practical 6, 7 & Performance Optimized PR8
+ * Features:
+ * - Stale-While-Revalidate (SWR) In-Memory Caching
+ * - In-Flight Request Deduplication
+ * - Background Data Prefetching
  * - JWT Token Storage & Automatic Authorization Header Injection
  * - Auto-Port Fallback (port 5000 / 3000)
  * - User Authentication (register, login, getMe, logout)
@@ -13,8 +16,26 @@ const FALLBACK_PORTS = ['http://localhost:5000', 'http://localhost:3000'];
 const TOKEN_STORAGE_KEY = 'adwf_auth_token';
 const USER_STORAGE_KEY = 'adwf_auth_user';
 
+// ── In-Memory SWR Cache & In-Flight Request Deduplication ──────────────────────
+const apiCache = new Map();
+const inFlightRequests = new Map();
+const CACHE_TTL_MS = 30000; // 30 seconds default TTL
+
+export function clearApiCache(pattern = null) {
+  if (!pattern) {
+    apiCache.clear();
+    return;
+  }
+  for (const key of apiCache.keys()) {
+    if (key.includes(pattern)) {
+      apiCache.delete(key);
+    }
+  }
+}
+
 export function setBaseUrl(newUrl) {
   BASE_URL = newUrl;
+  clearApiCache();
 }
 
 /**
@@ -30,6 +51,7 @@ export function setToken(token) {
   } else {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
   }
+  clearApiCache();
 }
 
 export function getStoredUser() {
@@ -52,13 +74,30 @@ export function setStoredUser(user) {
 export function logout() {
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
+  clearApiCache();
 }
 
 /**
  * Standardized Fetch Helper with JWT Header Injection and auto-port recovery
  */
-async function request(endpoint, options = {}) {
+async function request(endpoint, options = {}, bypassCache = false) {
+  const method = (options.method || 'GET').toUpperCase();
   const token = getToken();
+  const cacheKey = `${method}:${endpoint}:${token}`;
+
+  // Serve GET requests from SWR Cache if valid
+  if (method === 'GET' && !bypassCache && apiCache.has(cacheKey)) {
+    const cached = apiCache.get(cacheKey);
+    const isFresh = Date.now() - cached.timestamp < CACHE_TTL_MS;
+    if (isFresh) {
+      return cached.data;
+    }
+  }
+
+  // Deduplicate identical in-flight GET requests
+  if (method === 'GET' && inFlightRequests.has(cacheKey)) {
+    return inFlightRequests.get(cacheKey);
+  }
 
   const headers = {
     'Content-Type': 'application/json',
@@ -88,7 +127,7 @@ async function request(endpoint, options = {}) {
 
       let errorMessage = (data && (data.error || data.message)) || `HTTP ${response.status}: ${response.statusText}`;
       if (data && Array.isArray(data.details)) {
-        errorMessage = `${errorMessage} - ${data.details.map(d => `${d.field}: ${d.message}`).join(', ')}`;
+        errorMessage = `${errorMessage} - ${data.details.map((d) => `${d.field}: ${d.message}`).join(', ')}`;
       }
       const error = new Error(errorMessage);
       error.status = response.status;
@@ -99,25 +138,51 @@ async function request(endpoint, options = {}) {
     return data;
   };
 
-  try {
-    return await attemptFetch(BASE_URL);
-  } catch (err) {
-    if (err.name === 'TypeError' && err.message.includes('fetch')) {
-      for (const altUrl of FALLBACK_PORTS) {
-        if (altUrl !== BASE_URL) {
-          try {
-            const data = await attemptFetch(altUrl);
-            BASE_URL = altUrl;
-            return data;
-          } catch {
-            // continue fallback
+  const executeRequest = async () => {
+    try {
+      const data = await attemptFetch(BASE_URL);
+      if (method === 'GET') {
+        apiCache.set(cacheKey, { data, timestamp: Date.now() });
+      } else {
+        // Any mutation (POST, PUT, PATCH, DELETE) invalidates relevant cache
+        clearApiCache('/tasks');
+      }
+      return data;
+    } catch (err) {
+      if (err.name === 'TypeError' && err.message.includes('fetch')) {
+        for (const altUrl of FALLBACK_PORTS) {
+          if (altUrl !== BASE_URL) {
+            try {
+              const data = await attemptFetch(altUrl);
+              BASE_URL = altUrl;
+              if (method === 'GET') {
+                apiCache.set(cacheKey, { data, timestamp: Date.now() });
+              }
+              return data;
+            } catch {
+              // continue fallback
+            }
           }
         }
+        throw new Error(
+          `Cannot connect to backend server at ${BASE_URL}. Ensure Express server is running on port 5000 and MongoDB is connected.`
+        );
       }
-      throw new Error(`Cannot connect to backend server at ${BASE_URL}. Ensure Express server is running on port 5000 and MongoDB is connected.`);
+      throw err;
+    } finally {
+      if (method === 'GET') {
+        inFlightRequests.delete(cacheKey);
+      }
     }
-    throw err;
+  };
+
+  if (method === 'GET') {
+    const promise = executeRequest();
+    inFlightRequests.set(cacheKey, promise);
+    return promise;
   }
+
+  return executeRequest();
 }
 
 // ── Authentication Endpoints ──────────────────────────────────────────────────
@@ -162,9 +227,9 @@ export async function getMe() {
 // ── Task Management Endpoints (Protected by JWT) ──────────────────────────────
 
 /**
- * Get all tasks with query parameters
+ * Build endpoint URL for task queries
  */
-export async function getTasks(params = {}) {
+function buildTaskQueryUrl(params = {}) {
   const query = new URLSearchParams();
   if (params.search) query.append('search', params.search);
   if (params.status) query.append('status', params.status);
@@ -173,8 +238,26 @@ export async function getTasks(params = {}) {
   if (params.limit) query.append('limit', params.limit);
 
   const queryString = query.toString();
-  const endpoint = `/tasks${queryString ? `?${queryString}` : ''}`;
-  return await request(endpoint, { method: 'GET' });
+  return `/tasks${queryString ? `?${queryString}` : ''}`;
+}
+
+/**
+ * Get all tasks with query parameters (cached with SWR)
+ */
+export async function getTasks(params = {}, bypassCache = false) {
+  const endpoint = buildTaskQueryUrl(params);
+  return await request(endpoint, { method: 'GET' }, bypassCache);
+}
+
+/**
+ * Preload / Prefetch Tasks in Background for Instant Transition
+ */
+export function prefetchTasks(params = {}) {
+  const token = getToken();
+  if (!token) return;
+  const endpoint = buildTaskQueryUrl(params);
+  // Trigger background request to prime the cache
+  request(endpoint, { method: 'GET' }).catch(() => {});
 }
 
 /**
@@ -188,39 +271,47 @@ export async function getTaskById(id) {
  * Create a new task (POST /tasks)
  */
 export async function createTask(taskData) {
-  return await request('/tasks', {
+  const res = await request('/tasks', {
     method: 'POST',
     body: JSON.stringify(taskData)
   });
+  clearApiCache('/tasks');
+  return res;
 }
 
 /**
  * Full update of existing task (PUT /tasks/:id)
  */
 export async function updateTask(id, taskData) {
-  return await request(`/tasks/${id}`, {
+  const res = await request(`/tasks/${id}`, {
     method: 'PUT',
     body: JSON.stringify(taskData)
   });
+  clearApiCache('/tasks');
+  return res;
 }
 
 /**
  * Partial update of existing task (PATCH /tasks/:id)
  */
 export async function patchTask(id, partialData) {
-  return await request(`/tasks/${id}`, {
+  const res = await request(`/tasks/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(partialData)
   });
+  clearApiCache('/tasks');
+  return res;
 }
 
 /**
  * Delete a task (DELETE /tasks/:id)
  */
 export async function deleteTask(id) {
-  return await request(`/tasks/${id}`, {
+  const res = await request(`/tasks/${id}`, {
     method: 'DELETE'
   });
+  clearApiCache('/tasks');
+  return res;
 }
 
 /**
@@ -231,14 +322,18 @@ export async function executeHypermediaAction(href, method = 'GET', body = null)
   if (body !== null) {
     options.body = JSON.stringify(body);
   }
-  return await request(href, options);
+  const res = await request(href, options);
+  if (method.toUpperCase() !== 'GET') {
+    clearApiCache('/tasks');
+  }
+  return res;
 }
 
 /**
  * Health check to ping backend server with auto-port detection
  */
 export async function checkBackendHealth() {
-  for (const url of [BASE_URL, ...FALLBACK_PORTS.filter(u => u !== BASE_URL)]) {
+  for (const url of [BASE_URL, ...FALLBACK_PORTS.filter((u) => u !== BASE_URL)]) {
     try {
       const res = await fetch(`${url}/tasks/test-error`, { method: 'GET' });
       // If server responds with 500 from error handler, it's alive!
@@ -252,3 +347,4 @@ export async function checkBackendHealth() {
   }
   return { ok: false, error: 'Connection failed' };
 }
+

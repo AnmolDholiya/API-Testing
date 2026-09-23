@@ -1,15 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import Navbar from './components/Navbar';
 import StatsBar from './components/StatsBar';
-import TaskForm from './components/TaskForm';
 import TaskCard from './components/TaskCard';
-import TaskModal from './components/TaskModal';
-import ConfirmDialog from './components/ConfirmDialog';
 import ToastContainer from './components/ToastContainer';
-import HateoasModal from './components/HateoasModal';
-import AuthModal from './components/AuthModal';
 import { 
   getTasks, 
+  prefetchTasks,
   createTask, 
   updateTask, 
   patchTask, 
@@ -41,8 +37,50 @@ import {
   CheckCircle2,
   Lock,
   LogIn,
-  KeyRound
+  KeyRound,
+  Zap
 } from 'lucide-react';
+
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import PageSkeletonFallback from './components/PageSkeletonFallback';
+import { lazyWithDelay } from './utils/lazyWithDelay';
+
+// ── Dynamic / Lazy Loaded Components (Code-Splitting) ─────────────────────────
+const TaskForm = lazy(() => import('./components/TaskForm'));
+const TaskModal = lazy(() => import('./components/TaskModal'));
+const ConfirmDialog = lazy(() => import('./components/ConfirmDialog'));
+const HateoasModal = lazy(() => import('./components/HateoasModal'));
+const AuthModal = lazy(() => import('./components/AuthModal'));
+const PerformanceShowcase = lazy(() => import('./components/PerformanceShowcase'));
+
+// ── Lazy-Loaded Route Components (Practical 8 Route-Based Code Splitting) ─────
+const Projects = lazyWithDelay(() => import('./pages/Projects'), 300);
+const Analytics = lazyWithDelay(() => import('./pages/Analytics'), 300);
+const Contact = lazyWithDelay(() => import('./pages/Contact'), 300);
+
+// ── Chunk Preloading Helpers (Hover & Idle Prefetching) ────────────────────────
+export const preloadAuthModal = () => import('./components/AuthModal');
+export const preloadTaskModal = () => import('./components/TaskModal');
+export const preloadConfirmDialog = () => import('./components/ConfirmDialog');
+export const preloadHateoasModal = () => import('./components/HateoasModal');
+export const preloadTaskForm = () => import('./components/TaskForm');
+export const preloadPerformanceShowcase = () => import('./components/PerformanceShowcase');
+export const preloadProjects = () => import('./pages/Projects');
+export const preloadAnalytics = () => import('./pages/Analytics');
+export const preloadContact = () => import('./pages/Contact');
+
+
+function ModalLoadingFallback() {
+  return (
+    <div className="modal-overlay" style={{ animation: 'fadeIn 0.2s ease-out' }}>
+      <div className="modal-content" style={{ maxWidth: '420px', textAlign: 'center', padding: '2.5rem 2rem' }}>
+        <RefreshCw size={28} className="spinner" style={{ color: 'var(--primary)', margin: '0 auto 0.8rem' }} />
+        <h4 style={{ margin: '0 0 0.3rem', fontSize: '1rem', color: 'var(--text-main)' }}>Loading Module...</h4>
+        <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>Dynamically fetching chunk bundle</p>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   // Authentication State
@@ -59,6 +97,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState('board'); // 'board' or 'list'
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [newTaskInitialStatus, setNewTaskInitialStatus] = useState('pending');
+  const [showPerformanceHub, setShowPerformanceHub] = useState(false);
 
   // Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
@@ -92,6 +131,28 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // Idle Preload: Warm up modal bundles strictly after initial render and main thread settlement
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const timer = setTimeout(() => {
+        const idleCallback = window.requestIdleCallback || ((cb) => setTimeout(cb, 1000));
+        idleCallback(() => {
+          preloadAuthModal();
+          preloadTaskModal();
+          preloadConfirmDialog();
+          preloadHateoasModal();
+          preloadTaskForm();
+          preloadProjects();
+          preloadAnalytics();
+          preloadContact();
+        });
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+
+
   // ── Fetch Tasks from MongoDB Backend ──────────────────────────────────────
   const fetchTasksList = useCallback(async (currentPage = page, search = searchQuery, status = statusFilter, priority = priorityFilter) => {
     const token = getToken();
@@ -117,6 +178,17 @@ export default function App() {
         setPage(response.page || 1);
         setTotalPages(response.totalPages || 1);
         setBackendConnected(true);
+
+        // Preload next page of tasks in the background for instant pagination
+        if (response.page < response.totalPages) {
+          prefetchTasks({
+            page: response.page + 1,
+            limit: viewMode === 'board' ? 50 : 10,
+            search: search || undefined,
+            status: status || undefined,
+            priority: priority || undefined
+          });
+        }
       }
     } catch (err) {
       console.error('Fetch tasks error:', err);
@@ -131,6 +203,15 @@ export default function App() {
       setLoading(false);
     }
   }, [page, searchQuery, statusFilter, priorityFilter, viewMode]);
+
+  // Debounced Search Effect (300ms) to prevent unnecessary network requests
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchTasksList(1, searchQuery, statusFilter, priorityFilter);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
 
   // Initial mount: Verify stored session and fetch tasks
   useEffect(() => {
@@ -328,17 +409,26 @@ export default function App() {
   };
 
   return (
-    <div className="app-container">
-      {/* Top Navbar */}
-      <Navbar
-        backendConnected={backendConnected}
-        onRefresh={() => fetchTasksList(page)}
-        onOpenNewTask={() => handleOpenCreateModal('pending')}
-        onOpenAuth={() => setIsAuthModalOpen(true)}
-        currentUser={currentUser}
-        onLogout={handleLogout}
-        loading={loading}
-      />
+    <BrowserRouter>
+      <div className="app-container">
+        {/* Top Navbar with Route Links and Hover Preloading */}
+        <Navbar
+          backendConnected={backendConnected}
+          onRefresh={() => fetchTasksList(page)}
+          onOpenNewTask={() => handleOpenCreateModal('pending')}
+          onOpenAuth={() => setIsAuthModalOpen(true)}
+          onPreloadAuth={preloadAuthModal}
+          onPreloadNewTask={() => {
+            preloadTaskForm();
+            preloadTaskModal();
+          }}
+          onPreloadProjects={preloadProjects}
+          onPreloadAnalytics={preloadAnalytics}
+          onPreloadContact={preloadContact}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+          loading={loading}
+        />
 
       {/* Backend Offline Warning Banner */}
       {!backendConnected && (
@@ -373,8 +463,15 @@ export default function App() {
         </div>
       )}
 
-      {/* Unauthenticated Banner */}
-      {!currentUser && (
+      {/* ── Route-Based Suspense Container (Practical 8) ──────────────────── */}
+      <Suspense fallback={<PageSkeletonFallback />}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <>
+                {/* Unauthenticated Banner */}
+                {!currentUser && (
         <div style={{
           background: 'linear-gradient(135deg, #eef2ff, #f8fafc)',
           border: '1.5px solid #c7d2fe',
@@ -404,16 +501,18 @@ export default function App() {
             </div>
             <div>
               <h3 style={{ fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-main)', marginBottom: '0.2rem' }}>
-                Practical 7: JWT Authentication & Protected Middleware Active
+                Practical 7: JWT Authentication & Performance Pipeline Active
               </h3>
               <p style={{ fontSize: '0.86rem', color: 'var(--text-muted)' }}>
-                Task routes are protected by Express authentication middleware. Sign in or register to issue a JWT token.
+                Equipped with Dynamic Loading, SWR In-Memory Caching, Prefetching & Express MongoDB Indexing.
               </p>
             </div>
           </div>
           <button
             className="btn btn-primary"
             onClick={() => setIsAuthModalOpen(true)}
+            onMouseEnter={preloadAuthModal}
+            onFocus={preloadAuthModal}
             style={{ padding: '0.6rem 1.25rem' }}
           >
             <LogIn size={16} />
@@ -422,11 +521,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Interactive Metrics Bar (Click to Filter) */}
+      {/* Stats Summary Bar */}
       <StatsBar
         tasks={tasks}
-        activeFilter={priorityFilter === 'high' ? 'high' : statusFilter}
-        onSelectFilter={(filterKey, type = 'status') => {
+        totalCount={totalCount}
+        activeFilter={statusFilter || priorityFilter}
+        onFilterClick={(type, filterKey) => {
           if (type === 'priority') {
             setPriorityFilter(filterKey);
             fetchTasksList(1, searchQuery, statusFilter, filterKey);
@@ -445,7 +545,7 @@ export default function App() {
             <input
               type="text"
               className="search-input"
-              placeholder="Search tasks across MongoDB by title or description..."
+              placeholder="Search tasks across MongoDB (Debounced 300ms)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -514,15 +614,37 @@ export default function App() {
             </button>
           </div>
 
+          {/* Performance & Media Showcase Toggle */}
+          <button
+            className={`btn ${showPerformanceHub ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ padding: '0.55rem 0.95rem', fontSize: '0.82rem' }}
+            onClick={() => setShowPerformanceHub((prev) => !prev)}
+            onMouseEnter={preloadPerformanceShowcase}
+            onFocus={preloadPerformanceShowcase}
+            title="Toggle Code Splitting, Lazy Media, and Preloading Showcase"
+          >
+            <Zap size={15} />
+            <span>{showPerformanceHub ? 'Hide Perf Hub' : '⚡ Perf & Media Hub'}</span>
+          </button>
+
           {/* Quick Create Button */}
           <button
             className="btn btn-primary"
             style={{ padding: '0.55rem 1rem' }}
             onClick={() => handleOpenCreateModal('pending')}
+            onMouseEnter={() => {
+              preloadTaskForm();
+              preloadTaskModal();
+            }}
+            onFocus={() => {
+              preloadTaskForm();
+              preloadTaskModal();
+            }}
           >
             <Plus size={16} />
             <span>Add Task</span>
           </button>
+
         </div>
       </div>
 
@@ -541,6 +663,7 @@ export default function App() {
                 <button
                   className="btn-icon"
                   onClick={() => handleOpenCreateModal('pending')}
+                  onMouseEnter={preloadTaskForm}
                   title="Add pending task"
                   style={{ padding: '0.2rem 0.4rem' }}
                 >
@@ -558,6 +681,7 @@ export default function App() {
                     className="btn btn-secondary"
                     style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', marginTop: '0.6rem' }}
                     onClick={() => handleOpenCreateModal('pending')}
+                    onMouseEnter={preloadTaskForm}
                   >
                     + Create Task
                   </button>
@@ -569,9 +693,18 @@ export default function App() {
                     task={task}
                     isOptimistic={task.isOptimistic}
                     onToggleStatus={handleToggleStatus}
-                    onEdit={(t) => setEditingTask(t)}
-                    onDelete={(t) => setDeletingTask(t)}
-                    onViewHateoas={(t) => setInspectingTask(t)}
+                    onEdit={(t) => {
+                      preloadTaskModal();
+                      setEditingTask(t);
+                    }}
+                    onDelete={(t) => {
+                      preloadConfirmDialog();
+                      setDeletingTask(t);
+                    }}
+                    onViewHateoas={(t) => {
+                      preloadHateoasModal();
+                      setInspectingTask(t);
+                    }}
                   />
                 ))
               )}
@@ -590,6 +723,7 @@ export default function App() {
                 <button
                   className="btn-icon"
                   onClick={() => handleOpenCreateModal('in-progress')}
+                  onMouseEnter={preloadTaskForm}
                   title="Add in-progress task"
                   style={{ padding: '0.2rem 0.4rem' }}
                 >
@@ -602,10 +736,15 @@ export default function App() {
               {inProgressTasks.length === 0 ? (
                 <div className="column-empty">
                   <Play size={24} style={{ color: '#4f46e5', marginBottom: '0.4rem' }} />
-                  <p>No active tasks in progress</p>
-                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                    Click "Start" on any pending task to move it here
-                  </span>
+                  <p>{currentUser ? 'No tasks in progress' : 'Sign in to view tasks'}</p>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', marginTop: '0.6rem' }}
+                    onClick={() => handleOpenCreateModal('in-progress')}
+                    onMouseEnter={preloadTaskForm}
+                  >
+                    + Start Task
+                  </button>
                 </div>
               ) : (
                 inProgressTasks.map((task) => (
@@ -614,9 +753,18 @@ export default function App() {
                     task={task}
                     isOptimistic={task.isOptimistic}
                     onToggleStatus={handleToggleStatus}
-                    onEdit={(t) => setEditingTask(t)}
-                    onDelete={(t) => setDeletingTask(t)}
-                    onViewHateoas={(t) => setInspectingTask(t)}
+                    onEdit={(t) => {
+                      preloadTaskModal();
+                      setEditingTask(t);
+                    }}
+                    onDelete={(t) => {
+                      preloadConfirmDialog();
+                      setDeletingTask(t);
+                    }}
+                    onViewHateoas={(t) => {
+                      preloadHateoasModal();
+                      setInspectingTask(t);
+                    }}
                   />
                 ))
               )}
@@ -632,6 +780,15 @@ export default function App() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 <span className="column-count">{completedTasks.length}</span>
+                <button
+                  className="btn-icon"
+                  onClick={() => handleOpenCreateModal('completed')}
+                  onMouseEnter={preloadTaskForm}
+                  title="Add completed task"
+                  style={{ padding: '0.2rem 0.4rem' }}
+                >
+                  <Plus size={14} />
+                </button>
               </div>
             </div>
 
@@ -639,10 +796,15 @@ export default function App() {
               {completedTasks.length === 0 ? (
                 <div className="column-empty">
                   <CheckCircle2 size={24} style={{ color: '#059669', marginBottom: '0.4rem' }} />
-                  <p>No completed tasks yet</p>
-                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                    Check off tasks as you finish them
-                  </span>
+                  <p>{currentUser ? 'No completed tasks yet' : 'Sign in to view tasks'}</p>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', marginTop: '0.6rem' }}
+                    onClick={() => handleOpenCreateModal('completed')}
+                    onMouseEnter={preloadTaskForm}
+                  >
+                    + Add Task
+                  </button>
                 </div>
               ) : (
                 completedTasks.map((task) => (
@@ -651,9 +813,18 @@ export default function App() {
                     task={task}
                     isOptimistic={task.isOptimistic}
                     onToggleStatus={handleToggleStatus}
-                    onEdit={(t) => setEditingTask(t)}
-                    onDelete={(t) => setDeletingTask(t)}
-                    onViewHateoas={(t) => setInspectingTask(t)}
+                    onEdit={(t) => {
+                      preloadTaskModal();
+                      setEditingTask(t);
+                    }}
+                    onDelete={(t) => {
+                      preloadConfirmDialog();
+                      setDeletingTask(t);
+                    }}
+                    onViewHateoas={(t) => {
+                      preloadHateoasModal();
+                      setInspectingTask(t);
+                    }}
                   />
                 ))
               )}
@@ -661,77 +832,81 @@ export default function App() {
           </div>
         </div>
       ) : (
-        /* ── STREAM / LIST VIEW ────────────────────────────────────────── */
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">
-              <Inbox size={22} style={{ color: '#4f46e5' }} />
-              <span>MongoDB Tasks List</span>
-              <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-                ({totalCount} Total)
-              </span>
-            </h2>
-
-            {/* Status Filter Pills */}
-            <div className="filter-pills">
-              {['', 'pending', 'in-progress', 'completed'].map((statusKey) => (
+        /* ── LIST STREAM VIEW ──────────────────────────────────────────────── */
+        <div className="task-list-view">
+          {tasks.length === 0 ? (
+            <div className="empty-state">
+              <Inbox size={48} color="var(--primary)" style={{ opacity: 0.7, marginBottom: '0.75rem' }} />
+              <h3>{currentUser ? 'No tasks found' : 'Sign in to access tasks'}</h3>
+              <p>
+                {currentUser
+                  ? 'Try clearing your active filters or create a new task above.'
+                  : 'All endpoints are secured by JWT Bearer token authentication.'}
+              </p>
+              {currentUser ? (
                 <button
-                  key={statusKey}
-                  className={`filter-pill ${statusFilter === statusKey ? 'active' : ''}`}
-                  onClick={() => {
-                    setStatusFilter(statusKey);
-                    fetchTasksList(1, searchQuery, statusKey, priorityFilter);
-                  }}
+                  className="btn btn-primary"
+                  style={{ marginTop: '1rem' }}
+                  onClick={() => handleOpenCreateModal('pending')}
+                  onMouseEnter={preloadTaskForm}
                 >
-                  {statusKey === '' ? 'All' : statusKey === 'in-progress' ? 'In Progress' : statusKey.charAt(0).toUpperCase() + statusKey.slice(1)}
+                  <Plus size={16} />
+                  <span>Create First Task</span>
                 </button>
-              ))}
+              ) : (
+                <button
+                  className="btn btn-primary"
+                  style={{ marginTop: '1rem' }}
+                  onClick={() => setIsAuthModalOpen(true)}
+                  onMouseEnter={preloadAuthModal}
+                >
+                  <LogIn size={16} />
+                  <span>Sign In / Register</span>
+                </button>
+              )}
             </div>
-          </div>
-
-          <div className="task-items-container">
-            {loading && tasks.length === 0 ? (
-              Array.from({ length: 3 }).map((_, idx) => (
-                <div
-                  key={idx}
-                  className="skeleton"
-                  style={{ height: '72px', width: '100%', marginBottom: '0.5rem' }}
-                />
-              ))
-            ) : tasks.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-icon">📭</div>
-                <h4 style={{ fontSize: '1rem', color: 'var(--text-main)', marginBottom: '0.3rem' }}>
-                  No tasks found in MongoDB
-                </h4>
-                <p style={{ fontSize: '0.85rem' }}>
-                  {!currentUser
-                    ? 'Please sign in with JWT authentication to view and create tasks.'
-                    : searchQuery || statusFilter || priorityFilter
-                    ? 'No tasks match the active search and filter criteria.'
-                    : 'Click "+ Add Task" to create your first task!'}
-                </p>
-              </div>
-            ) : (
-              tasks.map((task) => (
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {tasks.map((task) => (
                 <TaskCard
                   key={task._id || task.id}
                   task={task}
                   isOptimistic={task.isOptimistic}
                   onToggleStatus={handleToggleStatus}
-                  onEdit={(t) => setEditingTask(t)}
-                  onDelete={(t) => setDeletingTask(t)}
-                  onViewHateoas={(t) => setInspectingTask(t)}
+                  onEdit={(t) => {
+                    preloadTaskModal();
+                    setEditingTask(t);
+                  }}
+                  onDelete={(t) => {
+                    preloadConfirmDialog();
+                    setDeletingTask(t);
+                  }}
+                  onViewHateoas={(t) => {
+                    preloadHateoasModal();
+                    setInspectingTask(t);
+                  }}
                 />
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
 
+          {/* Pagination Controls with Data Prefetch on Hover */}
           {totalPages > 1 && (
-            <div className="pagination-wrapper">
+            <div className="pagination">
               <button
                 className="btn btn-secondary"
                 disabled={page <= 1 || loading}
+                onMouseEnter={() => {
+                  if (page > 1) {
+                    prefetchTasks({
+                      page: page - 1,
+                      limit: 10,
+                      search: searchQuery,
+                      status: statusFilter,
+                      priority: priorityFilter
+                    });
+                  }
+                }}
                 onClick={() => {
                   const prevPage = page - 1;
                   setPage(prevPage);
@@ -749,6 +924,17 @@ export default function App() {
               <button
                 className="btn btn-secondary"
                 disabled={page >= totalPages || loading}
+                onMouseEnter={() => {
+                  if (page < totalPages) {
+                    prefetchTasks({
+                      page: page + 1,
+                      limit: 10,
+                      search: searchQuery,
+                      status: statusFilter,
+                      priority: priorityFilter
+                    });
+                  }
+                }}
                 onClick={() => {
                   const nextPage = page + 1;
                   setPage(nextPage);
@@ -763,63 +949,91 @@ export default function App() {
         </div>
       )}
 
-      {/* ── CREATE TASK MODAL ────────────────────────────────────────────── */}
-      {isNewTaskModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsNewTaskModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px' }}>
-            <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <PlusCircle size={22} color="#4f46e5" />
-                <h3 className="modal-title">Create New Task (POST /tasks)</h3>
+                {/* ── PERFORMANCE, CODE-SPLITTING & LAZY MEDIA SHOWCASE ────────────── */}
+                <Suspense fallback={<div className="skeleton" style={{ height: '320px', borderRadius: '12px', marginTop: '2rem' }} />}>
+                  {showPerformanceHub && <PerformanceShowcase />}
+                </Suspense>
+              </>
+            }
+          />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/analytics" element={<Analytics />} />
+          <Route path="/contact" element={<Contact />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+
+      {/* ── SUSPENSE WRAPPED DYNAMIC MODALS (Lazy Loaded on Demand) ── */}
+      <Suspense fallback={<ModalLoadingFallback />}>
+
+        {/* Create Task Modal (POST /tasks) */}
+        {isNewTaskModalOpen && (
+          <div className="modal-overlay" onClick={() => setIsNewTaskModalOpen(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px' }}>
+              <div className="modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <PlusCircle size={22} color="#4f46e5" />
+                  <h3 className="modal-title">Create New Task (POST /tasks)</h3>
+                </div>
+                <button className="btn-icon" onClick={() => setIsNewTaskModalOpen(false)}>
+                  <X size={18} />
+                </button>
               </div>
-              <button className="btn-icon" onClick={() => setIsNewTaskModalOpen(false)}>
-                <X size={18} />
-              </button>
+
+              <TaskForm
+                onSubmit={handleCreateTask}
+                loading={createLoading}
+                initialStatus={newTaskInitialStatus}
+              />
             </div>
-
-            <TaskForm
-              onSubmit={handleCreateTask}
-              loading={createLoading}
-              initialStatus={newTaskInitialStatus}
-            />
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ── AUTHENTICATION MODAL (JWT Sign In / Register) ────────────────── */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        onAuthSuccess={handleAuthSuccess}
-      />
+        {/* Authentication Modal (JWT Sign In / Register) */}
+        {isAuthModalOpen && (
+          <AuthModal
+            isOpen={isAuthModalOpen}
+            onClose={() => setIsAuthModalOpen(false)}
+            onAuthSuccess={handleAuthSuccess}
+          />
+        )}
 
-      {/* Edit Task Modal (PUT) */}
-      <TaskModal
-        task={editingTask}
-        isOpen={Boolean(editingTask)}
-        onClose={() => setEditingTask(null)}
-        onSave={handleUpdateTask}
-        loading={modalLoading}
-      />
+        {/* Edit Task Modal (PUT) */}
+        {editingTask && (
+          <TaskModal
+            task={editingTask}
+            isOpen={Boolean(editingTask)}
+            onClose={() => setEditingTask(null)}
+            onSave={handleUpdateTask}
+            loading={modalLoading}
+          />
+        )}
 
-      {/* Delete Confirmation Modal */}
-      <ConfirmDialog
-        isOpen={Boolean(deletingTask)}
-        taskTitle={deletingTask?.title}
-        onConfirm={handleConfirmDelete}
-        onCancel={() => setDeletingTask(null)}
-        loading={deleteLoading}
-      />
+        {/* Delete Confirmation Modal */}
+        {deletingTask && (
+          <ConfirmDialog
+            isOpen={Boolean(deletingTask)}
+            taskTitle={deletingTask?.title}
+            onConfirm={handleConfirmDelete}
+            onCancel={() => setDeletingTask(null)}
+            loading={deleteLoading}
+          />
+        )}
 
-      {/* HATEOAS & JSON Inspector Modal */}
-      <HateoasModal
-        task={inspectingTask}
-        isOpen={Boolean(inspectingTask)}
-        onClose={() => setInspectingTask(null)}
-      />
+        {/* HATEOAS & JSON Inspector Modal */}
+        {inspectingTask && (
+          <HateoasModal
+            task={inspectingTask}
+            isOpen={Boolean(inspectingTask)}
+            onClose={() => setInspectingTask(null)}
+          />
+        )}
+      </Suspense>
 
       {/* Toast Feedback Notification Container */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
+  </BrowserRouter>
   );
 }
+
