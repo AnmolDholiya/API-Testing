@@ -13,6 +13,9 @@ const errorHandler = require('./src/middleware/errorHandler');
 const authRoutes = require('./src/routes/authRoutes');
 const taskRoutes = require('./src/routes/taskRoutes');
 
+// Practical 10: Event Listeners (EventEmitter)
+require('./src/listeners');
+
 const app = express();
 
 app.use(cors({

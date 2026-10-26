@@ -6,6 +6,7 @@ const authMiddleware = require('../middleware/auth');
 const validateTask = require('../middleware/validateTask');
 const { generateTaskLinks, generateCollectionLinks } = require('../utils/taskLinks');
 const cache = require('../utils/cache');
+const taskEvents = require('../events');
 
 const { ALL_TASKS_CACHE_KEY, TASK_CACHE_PREFIX } = cache;
 
@@ -131,6 +132,57 @@ router.get('/debug/cache', (req, res) => {
 });
 
 /**
+ * @route   GET /tasks/debug/events
+ * @desc    Debug endpoint exposing background event audit logs & listener metrics (Practical 10)
+ * @status  200 OK, 401 Unauthorized
+ * @note    Must be placed BEFORE /:id route so Express does not interpret "debug" as a task ObjectId
+ */
+router.get('/debug/events', (req, res) => {
+  res.status(200).json({
+    success: true,
+    registeredEvents: taskEvents.eventNames(),
+    listenerCounts: {
+      'task-created': taskEvents.listenerCount('task-created'),
+      'task-deleted': taskEvents.listenerCount('task-deleted'),
+      'error': taskEvents.listenerCount('error')
+    },
+    totalEventsLogged: taskEvents.getLogs().length,
+    events: taskEvents.getLogs()
+  });
+});
+
+/**
+ * @route   POST /tasks/simulate-error-event
+ * @desc    Deliberately triggers an asynchronous error inside the event loop to verify the 'error' listener (Practical 10 Supplementary)
+ * @status  200 OK, 401 Unauthorized
+ */
+router.post('/simulate-error-event', (req, res) => {
+  const triggerTime = new Date().toISOString();
+  console.log(`[API] Error simulation endpoint called at ${triggerTime}. Responding immediately.`);
+
+  res.status(200).json({
+    success: true,
+    message: 'Simulated asynchronous event error dispatched to event loop',
+    dispatchedAt: triggerTime
+  });
+
+  // Schedule event emission onto the event loop using setImmediate
+  setImmediate(() => {
+    try {
+      taskEvents.emit('task-created', {
+        id: 'simulated-error-id',
+        title: req.body.title || 'Crash Test Dummy Task',
+        assignedUser: req.body.assignedUser || req.user?.email || 'admin@example.com',
+        delayMs: req.body.delayMs || 300,
+        __simulateError: true
+      });
+    } catch (err) {
+      taskEvents.emit('error', err);
+    }
+  });
+});
+
+/**
  * @route   GET /tasks/:id
  * @desc    Get single task by ObjectId with in-memory caching and HATEOAS links
  * @status  200 OK, 400 Bad Request, 401 Unauthorized, or 404 Not Found
@@ -181,12 +233,12 @@ router.get('/:id', validateTaskId, async (req, res, next) => {
 
 /**
  * @route   POST /tasks
- * @desc    Create a new task with validation middleware, cache invalidation & HATEOAS response
+ * @desc    Create a new task with validation middleware, cache invalidation & asynchronous event emission (Practical 10)
  * @status  201 Created, 400 Bad Request, 401 Unauthorized
  */
 router.post('/', validateTask, async (req, res, next) => {
   try {
-    const { title, description, status, completed, priority, dueDate } = req.body;
+    const { title, description, status, completed, priority, dueDate, assignedUser, delayMs, simulateError } = req.body;
 
     const newTask = new Task({
       title,
@@ -194,10 +246,12 @@ router.post('/', validateTask, async (req, res, next) => {
       status,
       completed,
       priority,
-      dueDate
+      dueDate,
+      assignedUser: assignedUser || req.user?.email || 'Unassigned'
     });
 
     const savedTask = await newTask.save();
+    console.log('[API] Task saved successfully.');
 
     // Invalidate list cache after successful creation
     cache.del(ALL_TASKS_CACHE_KEY);
@@ -207,11 +261,32 @@ router.post('/', validateTask, async (req, res, next) => {
     const links = generateTaskLinks(savedTask);
     taskObj._links = links;
 
+    // ── Practical 10 Step 3: Respond immediately, then schedule asynchronous event ──
+    const apiResponseTime = new Date().toISOString();
+    console.log(`[API] Response sent at: ${apiResponseTime}`);
+
     res.status(201).json({
       success: true,
       message: 'Task created successfully',
       data: taskObj,
-      _links: links
+      _links: links,
+      apiTimestamp: apiResponseTime
+    });
+
+    // Asynchronous background notification via native EventEmitter scheduled on next event loop turn
+    setImmediate(() => {
+      try {
+        const eventPayload = {
+          ...taskObj,
+          assignedUser: taskObj.assignedUser || req.user?.email || 'Unassigned',
+          user: req.user,
+          delayMs: delayMs,
+          __simulateError: simulateError
+        };
+        taskEvents.emit('task-created', eventPayload);
+      } catch (emitErr) {
+        taskEvents.emit('error', emitErr);
+      }
     });
   } catch (err) {
     next(err);
@@ -349,10 +424,30 @@ router.delete('/:id', validateTaskId, async (req, res, next) => {
     console.log(`CACHE INVALIDATED: ${ALL_TASKS_CACHE_KEY}`);
     console.log(`CACHE INVALIDATED: ${individualCacheKey}`);
 
+    const apiResponseTime = new Date().toISOString();
+    console.log(`[API] Task deleted successfully: ${deletedTask._id}`);
+    console.log(`[API] Delete response sent at: ${apiResponseTime}`);
+
     res.status(200).json({
       success: true,
       message: 'Task deleted successfully',
-      data: deletedTask
+      data: deletedTask,
+      apiTimestamp: apiResponseTime
+    });
+
+    // ── Practical 10 Supplementary Problem 1: Asynchronously emit task-deleted event ──
+    setImmediate(() => {
+      try {
+        taskEvents.emit('task-deleted', {
+          id: deletedTask._id,
+          title: deletedTask.title,
+          assignedUser: deletedTask.assignedUser,
+          deletedBy: req.user?.email || 'admin',
+          delayMs: req.body?.delayMs
+        });
+      } catch (emitErr) {
+        taskEvents.emit('error', emitErr);
+      }
     });
   } catch (err) {
     next(err);

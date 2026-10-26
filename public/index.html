@@ -393,6 +393,71 @@
       white-space: pre-wrap;
       word-break: break-all;
     }
+
+    /* Practical 10: Event-Driven Architecture styles */
+    .event-card {
+      margin-top: 1.5rem;
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    }
+    .event-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+    .stat-box {
+      background: #f8fafc;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 0.85rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .stat-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .stat-value {
+      font-size: 1.2rem;
+      font-weight: 800;
+      font-family: var(--font-mono);
+      color: var(--accent-blue);
+    }
+    .event-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 0.85rem;
+    }
+    .event-table th, .event-table td {
+      padding: 0.65rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .event-table th {
+      background: #f1f5f9;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .event-pill {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .event-pill-task-created { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+    .event-pill-task-deleted { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .event-pill-error { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
   </style>
 </head>
 <body>
@@ -490,6 +555,70 @@
           <label>Response JSON Body (With Hypermedia _links)</label>
           <pre id="jsonViewer">// Perform any action to inspect HATEOAS level 3 responses</pre>
         </div>
+      </div>
+    </div>
+
+    <!-- Practical 10: Event-Driven Background Processing (EventEmitter) -->
+    <div class="event-card">
+      <div class="card-header">
+        <div>
+          <h2>⚡ Practical 10: Event-Driven Background Processing (Node.js EventEmitter)</h2>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.2rem;">
+            Demonstrates non-blocking background notification handling decoupled from the HTTP request-response cycle.
+          </p>
+        </div>
+        <button class="btn btn-secondary" onclick="fetchEventLogs()">↻ Refresh Events</button>
+      </div>
+
+      <div class="event-stats-grid">
+        <div class="stat-box">
+          <span class="stat-label">Active Listeners</span>
+          <span class="stat-value" id="activeListenersCount">3</span>
+          <span style="font-size: 0.75rem; color: var(--accent-emerald);">● task-created, task-deleted, error</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Total Events Emitted</span>
+          <span class="stat-value" id="totalEventsCount">0</span>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Audited in memory</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">API Response Time</span>
+          <span class="stat-value" style="color: var(--accent-emerald);" id="lastApiResponseTime">Instant (&lt;20ms)</span>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Non-blocking HTTP 201</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Background Execution</span>
+          <span class="stat-value" style="color: var(--accent-amber);" id="lastListenerTime">Async (~2.0s)</span>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Decoupled from client</span>
+        </div>
+      </div>
+
+      <div class="btn-group" style="margin-bottom: 1.25rem;">
+        <button class="btn btn-primary" onclick="createAsyncTask(2000)">🚀 Create Task + Async Event (2.0s delay)</button>
+        <button class="btn btn-purple" onclick="createAsyncTask(3000)">⏳ Simulate Slow Handler (3.0s delay, Instant 201)</button>
+        <button class="btn btn-danger" onclick="triggerSimulatedError()">💥 Trigger Simulated Error (Handled Gracefully)</button>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table class="event-table">
+          <thead>
+            <tr>
+              <th>Event Type</th>
+              <th>Task / Description</th>
+              <th>Assigned User</th>
+              <th>Dispatched / Queued</th>
+              <th>Background Finished</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="eventLogsBody">
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                No background events recorded yet. Click one of the buttons above to emit events!
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -725,8 +854,153 @@
       );
     }
 
+    // ── Authentication & Practical 10 Event Management ─────────────────────────
+    let userToken = localStorage.getItem('adwf_jwt_token') || '';
+
+    async function ensureAuthToken() {
+      if (userToken) return userToken;
+      try {
+        const loginRes = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: 'testuser@example.com', password: 'password123' })
+        });
+        const data = await loginRes.json();
+        if (data.token) {
+          userToken = data.token;
+          localStorage.setItem('adwf_jwt_token', userToken);
+          return userToken;
+        }
+      } catch (e) {
+        console.warn('Auto login failed:', e);
+      }
+      return '';
+    }
+
+    async function authFetch(url, options = {}) {
+      const token = await ensureAuthToken();
+      options.headers = options.headers || {};
+      if (token) {
+        options.headers['Authorization'] = `Bearer ${token}`;
+      }
+      return fetch(url, options);
+    }
+
+    async function fetchEventLogs() {
+      try {
+        const res = await authFetch('/tasks/debug/events');
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        document.getElementById('totalEventsCount').textContent = data.totalEventsLogged || 0;
+        const listenersCount = (data.listenerCounts['task-created'] || 0) + 
+                               (data.listenerCounts['task-deleted'] || 0) + 
+                               (data.listenerCounts['error'] || 0);
+        document.getElementById('activeListenersCount').textContent = listenersCount;
+
+        const tbody = document.getElementById('eventLogsBody');
+        if (!data.events || data.events.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                No background events recorded yet. Click one of the buttons above to emit events!
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        tbody.innerHTML = data.events.slice(0, 10).map(evt => {
+          const pillClass = `event-pill event-pill-${evt.event}`;
+          const isError = evt.event === 'error';
+          const scheduled = evt.scheduledAt ? new Date(evt.scheduledAt).toLocaleTimeString() : (evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : '-');
+          const finished = evt.completedAt ? new Date(evt.completedAt).toLocaleTimeString() : (isError ? new Date(evt.timestamp).toLocaleTimeString() : 'In Progress...');
+          const desc = isError ? (evt.errorMessage || 'Unknown Error') : (evt.title || `Task #${(evt.taskId || '').slice(-6)}`);
+          const user = evt.assignedUser || evt.deletedBy || (isError ? 'System' : 'admin');
+          const status = evt.status || 'processed';
+
+          return `
+            <tr>
+              <td><span class="${pillClass}">${evt.event}</span></td>
+              <td style="font-weight: 500;">${escapeHtml(desc)}</td>
+              <td style="font-family: var(--font-mono); font-size: 0.8rem;">${escapeHtml(user)}</td>
+              <td style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">${scheduled}</td>
+              <td style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent-emerald);">${finished}</td>
+              <td><span class="status-badge status-200" style="font-size: 0.75rem;">${status}</span></td>
+            </tr>
+          `;
+        }).join('');
+      } catch (err) {
+        console.error('Error fetching event logs:', err);
+      }
+    }
+
+    async function createAsyncTask(delayMs = 2000) {
+      const titles = [
+        'Send Email Notification',
+        'Sync Analytics Pipeline',
+        'Generate PDF Invoice',
+        'Push Webhook Notification',
+        'Compress User Attachment'
+      ];
+      const randomTitle = titles[Math.floor(Math.random() * titles.length)] + ` (${delayMs}ms async)`;
+      const start = performance.now();
+
+      try {
+        const res = await authFetch('/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: randomTitle,
+            description: `Triggered with simulated ${delayMs}ms EventEmitter background processing`,
+            priority: 'high',
+            status: 'pending',
+            assignedUser: 'dev-lead@university.edu',
+            delayMs: delayMs
+          })
+        });
+
+        const data = await res.json();
+        const duration = Math.round(performance.now() - start);
+        displayResponse(res.status, data, duration);
+
+        document.getElementById('lastApiResponseTime').textContent = `${duration} ms (Fast)`;
+        document.getElementById('lastListenerTime').textContent = `Running (~${(delayMs/1000).toFixed(1)}s)`;
+
+        fetchTasks();
+        setTimeout(fetchEventLogs, delayMs + 300);
+      } catch (err) {
+        displayResponse(500, { error: err.message }, 0);
+      }
+    }
+
+    async function triggerSimulatedError() {
+      const start = performance.now();
+      try {
+        const res = await authFetch('/tasks/simulate-error-event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'Fault Injection Event dummy',
+            delayMs: 300
+          })
+        });
+        const data = await res.json();
+        const duration = Math.round(performance.now() - start);
+        displayResponse(res.status, data, duration);
+
+        setTimeout(fetchEventLogs, 600);
+      } catch (err) {
+        displayResponse(500, { error: err.message }, 0);
+      }
+    }
+
     // Initial load
-    fetchTasks();
+    ensureAuthToken().then(() => {
+      fetchTasks();
+      fetchEventLogs();
+      setInterval(fetchEventLogs, 4000);
+    });
   </script>
 </body>
 </html>

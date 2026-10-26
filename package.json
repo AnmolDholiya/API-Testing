@@ -9,7 +9,9 @@
     "client": "npm run dev --prefix client",
     "client:build": "npm run build --prefix client",
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue,magenta\" \"npm run server\" \"npm run client\"",
-    "test": "node test-api.js"
+    "test": "node test-practical10.js",
+    "test:pr9": "node test-practical9.js",
+    "test:pr10": "node test-practical10.js"
   },
   "keywords": [
     "express",
