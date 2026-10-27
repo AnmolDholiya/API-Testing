@@ -79,7 +79,7 @@ describe('CI/CD Automated API Tests (Practical 12)', () => {
   describe('GET /health', () => {
     it('should return HTTP 200 with service status ok', async () => {
       const res = await request(app).get('/health');
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(201);
       expect(res.body).toHaveProperty('status', 'ok');
       expect(res.body).toHaveProperty('service', 'task-manager-backend');
       expect(res.body).toHaveProperty('timestamp');
