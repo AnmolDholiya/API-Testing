@@ -1,19 +1,11 @@
 const EventEmitter = require('events');
 
-/**
- * TaskEvents - Custom EventEmitter for Task Management System
- * Practical 10: Asynchronous Processing with Event-Driven Architecture
- */
 class TaskEvents extends EventEmitter {
   constructor() {
     super();
     this.eventLogs = [];
   }
 
-
-  /**
-   * Record background event dispatch for auditing and test assertions
-   */
   recordLog(entry) {
     this.eventLogs.unshift({
       ...entry,

@@ -1,15 +1,5 @@
 const taskEvents = require('./events');
 
-/**
- * Event Listeners for Practical 10: Asynchronous Processing with Event-Driven Architecture
- * 
- * Demonstrates:
- * 1. 'task-created': Asynchronous notification processing (logging title, timestamp, assigned user)
- *    with artificial delay (approx 2s) to visibly prove non-blocking execution.
- * 2. 'task-deleted': Supplementary listener handling cleanup/notification when a task is removed.
- * 3. 'error': Supplementary error event listener preventing unhandled exceptions from crashing the process.
- */
-
 // ── Listener 1: Task Created Event Handler ──────────────────────────────────────
 taskEvents.on('task-created', (task) => {
   try {

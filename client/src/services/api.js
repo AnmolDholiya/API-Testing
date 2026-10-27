@@ -10,7 +10,7 @@
  * - Task CRUD and Level 3 HATEOAS Execution
  */
 
-export let BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+export let BASE_URL = import.meta.env.VITE_API_URL !== undefined ? import.meta.env.VITE_API_URL : 'http://localhost:5000';
 
 const FALLBACK_PORTS = ['http://localhost:5000', 'http://localhost:3000'];
 const TOKEN_STORAGE_KEY = 'adwf_auth_token';

@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+client/
+dist/
+.git
+.gitignore
+.env
+.env.*
+*.log
+test-*.js
+.postman/
+postman/

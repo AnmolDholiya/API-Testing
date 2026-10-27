@@ -41,6 +41,17 @@ mongoose.connect(MONGO_URI)
     console.error('MongoDB connection error:', err.message);
   });
 
+// ── Health Check Endpoint (Docker & Monitoring) ──────────────────────────────
+app.get('/health', (req, res) => {
+  const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    service: 'task-manager-backend',
+    database: dbStatus
+  });
+});
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.use('/auth', authRoutes);
 app.use('/', authRoutes); // Direct support for /register, /login, /me

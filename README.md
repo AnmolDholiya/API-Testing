@@ -499,4 +499,273 @@ Node.js runs user JavaScript code on a **single thread (the event loop)**. If a 
 | **Concurrency / Worker Queuing** | All listeners run in same process memory | Tasks can be load-balanced across worker pools |
 | **Dependencies & Overhead**| Zero external dependencies; near-zero latency | Requires running separate service infrastructure |
 
+---
+
+# Practical 11: Containerization with Docker and Docker Compose
+
+**Course**: Advanced Web Development Frameworks (ITUE301)  
+**CO/PO Mapping**: CO1, CO2, CO4 / PO3, PO5  
+
+---
+
+## 1. 🎯 Objective
+
+To containerize the full-stack StudentHub Task Management application into multi-container microservices using **Docker** and **Docker Compose**, providing reproducible, isolated, and production-ready environments for:
+- **Frontend SPA**: React 19 + Vite 8 compiled into high-performance static assets and served by an Nginx web server.
+- **Backend API**: Node.js 20 (Express) REST API with JWT authentication, in-memory caching, and native event-driven asynchronous processing.
+- **Database**: MongoDB 7.0 database engine with persistent data storage via a named Docker volume.
+- **Internal Networking**: Isolated bridge network (`app-network`) enabling inter-service DNS resolution without hardcoded IP addresses or `localhost` dependencies.
+
+---
+
+## 2. 🧰 Technologies Used
+
+- **Docker**: Engine version 29+ (Open-source container virtualization platform)
+- **Docker Compose**: Compose v2/v5 (Multi-container orchestration)
+- **Frontend**: React 19, Vite 8, React Router v7, Nginx Alpine
+- **Backend**: Node.js 20 Alpine, Express 4, Mongoose 9, native `events` (EventEmitter), `node-cache`
+- **Database**: Official MongoDB 7.0 Community Edition image (`mongo:7.0`)
+- **Networking & Storage**: Docker bridge network (`app-network`) and named volume (`mongodb_data`)
+
+---
+
+## 3. 🏗️ Project Architecture & Service Topology
+
+```text
+                               Host Browser / Postman
+                                         │
+                   ┌─────────────────────┴─────────────────────┐
+                   ▼ (Port 5173)                               ▼ (Port 5000)
+    ┌───────────────────────────────┐           ┌───────────────────────────────┐
+    │       frontend container      │           │       backend container       │
+    │        (nginx:alpine)         │           │      (node:20-alpine)         │
+    │                               │           │                               │
+    │  - Serves React + Vite bundle │           │  - Express REST API           │
+    │  - Handles SPA client routing │           │  - JWT Auth + Validation      │
+    │  - Reverse proxies:           │           │  - EventEmitter (Async logs)  │
+    │    /tasks ──────┐             │           │  - /health endpoint           │
+    │    /auth  ──────┼─────────────┼──────────►│                               │
+    │    /health ─────┘             │           │  MONGO_URI:                   │
+    └───────────────────────────────┘           │  mongodb://mongodb:27017/     │
+                   ▲                            └───────────────┬───────────────┘
+                   │                                            │
+                   │           app-network (Bridge)             ▼
+                   │                               ┌─────────────────────────────┐
+                   │                               │      mongodb container      │
+                   │                               │        (mongo:7.0)          │
+                   │                               │                             │
+                   └───────────────────────────────┤  - Port: 27017              │
+                                                   │  - Healthcheck (mongosh)    │
+                                                   └──────────────┬──────────────┘
+                                                                  │
+                                                        Mounted at /data/db
+                                                                  ▼
+                                                   ┌─────────────────────────────┐
+                                                   │    mongodb_data (Volume)    │
+                                                   │   (Persistent Host Disk)    │
+                                                   └─────────────────────────────┘
+```
+
+---
+
+## 4. 📦 Explanation of Containers
+
+### A. Frontend Container (`frontend`)
+- **Base Images**: Multi-stage build using `node:20-alpine` (builder) and `nginx:alpine` (production runtime).
+- **Stage 1 (Builder)**: Installs dependencies using `npm ci` and runs `npm run build` to generate an optimized, minified production bundle in `dist/`.
+- **Stage 2 (Runtime)**: Minimal Nginx image copying compiled assets into `/usr/share/nginx/html`.
+- **Nginx Configuration (`client/nginx.conf`)**:
+  - Directs all client-side navigation (`/projects`, `/analytics`, `/contact`) to `index.html` via `try_files $uri $uri/ /index.html;`, avoiding 404 errors on browser page reloads.
+  - Acts as an API reverse proxy forwarding `/tasks`, `/auth`, and `/health` directly to `http://backend:5000`, eliminating Cross-Origin Resource Sharing (CORS) friction.
+- **Port**: Exposed on container `5173`, published to host `5173:5173`.
+
+### B. Backend Container (`backend`)
+- **Base Image**: Official `node:20-alpine`.
+- **Optimization**: Copies `package.json` and `package-lock.json` before source code, executing `npm ci --omit=dev` to cache production dependencies.
+- **Connection**: Uses `mongodb://mongodb:27017/taskdb` to communicate with the database container via Docker's internal DNS.
+- **Startup Order**: Uses `depends_on` with `condition: service_healthy` to guarantee that Node.js starts only after MongoDB has initialized and passed its ping check.
+- **Port**: Exposed on container `5000`, published to host `5000:5000`.
+
+### C. Database Container (`mongodb`)
+- **Base Image**: Official `mongo:7.0`.
+- **Storage**: Maps named Docker volume `mongodb_data` to `/data/db`.
+- **Health Check**: Executes `mongosh --eval "db.adminCommand('ping')"` every 10 seconds to verify database responsiveness before downstream services connect.
+- **Port**: Published to host `27017:27017` for development GUI inspection (Compass/mongosh).
+
+---
+
+## 5. 🌐 Docker Network and Named Volume Configuration
+
+### Bridge Network (`app-network`)
+```yaml
+networks:
+  app-network:
+    name: app-network
+    driver: bridge
+```
+All three containers share `app-network`. Services resolve each other by container service name:
+- Backend connects to `mongodb:27017`.
+- Frontend Nginx proxy connects to `backend:5000`.
+
+### Persistent Volume (`mongodb_data`)
+```yaml
+volumes:
+  mongodb_data:
+    name: mongodb_data
+```
+The named volume preserves database state on the host file system. Even if containers are stopped or recreated (`docker compose down` followed by `docker compose up`), all tasks, users, and credentials remain intact.
+
+---
+
+## 6. ⚙️ Prerequisites
+
+Before running the containerized application, ensure you have:
+1. **Docker Desktop** installed and running (Windows / macOS / Linux).
+2. **Docker Compose v2+** (`docker compose version`).
+3. Port availability for `5173`, `5000`, and `27017`.
+
+---
+
+## 7. 🚀 Installation & Setup Instructions
+
+### Step 1: Clone Repository
+```bash
+git clone https://github.com/AnmolDholiya/API-Testing.git
+cd API-Testing
+```
+
+### Step 2: Configure Environment Variables
+Create a `.env` file from the provided example:
+```bash
+# Windows PowerShell
+Copy-Item .env.example .env
+
+# Linux / macOS
+cp .env.example .env
+```
+
+---
+
+## 8. 🔑 Environment Variable Configuration
+
+The default `.env` file includes:
+
+```env
+PORT=5000
+NODE_ENV=production
+MONGO_URI=mongodb://mongodb:27017/taskdb
+JWT_SECRET=adwf_jwt_secret_key_practical_7_2026
+JWT_EXPIRES_IN=1h
+```
+
+---
+
+## 9. 🛠️ Commands to Build and Start Containers
+
+### Build and Start in Foreground (Interactive Logs)
+```bash
+docker compose up --build
+```
+
+### Build and Start in Detached Mode (Background)
+```bash
+docker compose up --build -d
+```
+
+### Or using npm convenience scripts
+```bash
+npm run docker:build
+npm run docker:up
+```
+
+---
+
+## 10. 🔍 Commands to Inspect Containers and Logs
+
+### Check Running Containers
+```bash
+docker compose ps
+# or
+docker ps
+```
+
+### View Combined Logs
+```bash
+docker compose logs
+```
+
+### Follow Specific Service Logs
+```bash
+# Follow backend logs
+docker compose logs -f backend
+
+# Follow frontend logs
+docker compose logs -f frontend
+
+# Follow MongoDB logs
+docker compose logs -f mongodb
+```
+
+### Validate Docker Compose Configuration
+```bash
+docker compose config
+```
+
+---
+
+## 11. 🌐 Application URLs & Endpoints
+
+| Service / Interface | Local URL | Description |
+| :--- | :--- | :--- |
+| **Frontend Application** | `http://localhost:5173` | React 19 + Vite Kanban board and analytics dashboard |
+| **Backend Health Check** | `http://localhost:5000/health` | Service and database connectivity status check |
+| **Backend Interactive Dashboard** | `http://localhost:5000` | Static Express dashboard testing Practical 10 events |
+| **User Authentication** | `POST http://localhost:5000/auth/login` | JWT login endpoint |
+| **Task CRUD & Async Events** | `http://localhost:5000/tasks` | Task creation (201 Created), list, and deletion |
+| **Event Audit Metrics** | `GET http://localhost:5000/tasks/debug/events` | Practical 10 in-memory event audit log |
+| **Cache Debug Metrics** | `GET http://localhost:5000/tasks/debug/cache` | Practical 9 in-memory cache hits/misses |
+| **MongoDB Direct Port** | `localhost:27017` | Direct database connection for MongoDB Compass |
+
+---
+
+## 12. 🛑 Instructions for Stopping the Application
+
+### Stop Containers (Preserves Database Data)
+```bash
+docker compose down
+```
+> [!IMPORTANT]
+> Running `docker compose down` gracefully stops and removes the containers while **preserving** the `mongodb_data` volume and all your stored tasks and users.
+
+### Stop and Wipe Database Data (Caution!)
+```bash
+# ONLY use when you intentionally want to wipe all stored database data:
+docker compose down -v
+```
+
+---
+
+## 13. 💾 Database Persistence Explanation
+
+In Docker, container file systems are **ephemeral**—any file written directly inside a container's writable layer is lost when the container is deleted.
+
+To prevent data loss:
+1. Docker Compose declares a named volume: `mongodb_data`.
+2. The volume is mounted to MongoDB's internal data directory: `/data/db`.
+3. When MongoDB writes BSON documents and WiredTiger storage files, they are written directly to host storage managed by the Docker engine.
+4. When you execute `docker compose down` and later `docker compose up -d`, the new MongoDB container re-attaches to `mongodb_data`, immediately restoring all previous tasks, users, and audit records.
+
+---
+
+## 14. 🔧 Common Troubleshooting Steps
+
+| Issue | Cause | Solution |
+| :--- | :--- | :--- |
+| **Port Conflict (`bind: address already in use`)** | Local MongoDB or Node server is running on port 27017, 5000, or 5173 on the host machine. | Stop local services before launching Docker: `net stop MongoDB` or terminate running `node server.js` processes. |
+| **Backend Fails to Connect to MongoDB** | Backend started before MongoDB finished initializing. | Ensure `depends_on` specifies `condition: service_healthy` in `docker-compose.yml`. |
+| **React Router 404 on Page Refresh** | Web server trying to find physical file matching client route. | Nginx must include `try_files $uri $uri/ /index.html;` in `nginx.conf`. |
+| **Frontend Cannot Reach API** | Frontend container attempting to reach `localhost:5000` inside its own container network. | Use the Nginx reverse proxy configuration (`proxy_pass http://backend:5000;`) so browser requests are forwarded over Docker's internal `app-network`. |
+| **Docker Desktop Daemon Not Running** | Docker Desktop engine is stopped on Windows. | Launch Docker Desktop from the Start menu and wait for the status bar icon to show "Engine Running". |
+
+
 
