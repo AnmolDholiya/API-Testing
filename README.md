@@ -1,8 +1,10 @@
-# Practical 8: Performance Optimization and Lazy Loading in React
+# StudentHub & Task Management System
+
+[![CI Pipeline](https://github.com/AnmolDholiya/API-Testing/actions/workflows/ci.yml/badge.svg)](https://github.com/AnmolDholiya/API-Testing/actions/workflows/ci.yml)
 
 **Course**: Advanced Web Development Frameworks (ITUE301)  
-**CO/PO Mapping**: CO1, CO2 / PO3, PO5  
-**Pass Threshold**: 5 / 10 Marks (Rubric: Concepts 2M, Implementation 4M, Correctness 2M, Reflection 1M, Evidence 1M)
+**Repository**: [AnmolDholiya/API-Testing](https://github.com/AnmolDholiya/API-Testing)  
+**CI/CD Status**: Automated GitHub Actions Workflow on `main` branch push  
 
 ---
 
@@ -766,6 +768,194 @@ To prevent data loss:
 | **React Router 404 on Page Refresh** | Web server trying to find physical file matching client route. | Nginx must include `try_files $uri $uri/ /index.html;` in `nginx.conf`. |
 | **Frontend Cannot Reach API** | Frontend container attempting to reach `localhost:5000` inside its own container network. | Use the Nginx reverse proxy configuration (`proxy_pass http://backend:5000;`) so browser requests are forwarded over Docker's internal `app-network`. |
 | **Docker Desktop Daemon Not Running** | Docker Desktop engine is stopped on Windows. | Launch Docker Desktop from the Start menu and wait for the status bar icon to show "Engine Running". |
+
+---
+
+# Practical 12: CI/CD Pipeline with GitHub Actions
+
+**Course**: Advanced Web Development Frameworks (ITUE301)  
+**Status**: Automated Continuous Integration (CI) Pipeline  
+**Badge**: [![CI Pipeline](https://github.com/AnmolDholiya/API-Testing/actions/workflows/ci.yml/badge.svg)](https://github.com/AnmolDholiya/API-Testing/actions/workflows/ci.yml)
+
+---
+
+## 1. 🎯 Objective
+
+To implement an automated **Continuous Integration (CI)** pipeline using **GitHub Actions** that:
+1. Triggers automatically on every code push to the `main` branch (and supports manual triggers via `workflow_dispatch`).
+2. Provisions an isolated Ubuntu virtual machine environment (`ubuntu-latest`).
+3. Sets up Node.js runtime environment (version 20).
+4. Installs project dependencies deterministically via `npm install`.
+5. Executes automated backend integration tests using **Jest** and **Supertest**.
+6. Demonstrates a controlled pipeline failure on incorrect assertions (Red X) followed by a passing pipeline upon correction (Green Checkmark).
+
+---
+
+## 2. 🏗️ CI Pipeline Architecture
+
+```text
+[ Developer Machine ]
+        │
+        │ git push origin main
+        ▼
+[ GitHub Repository: AnmolDholiya/API-Testing ]
+        │
+        ▼ (.github/workflows/ci.yml triggers)
+┌──────────────────────────────────────────────────────────┐
+│ GitHub Actions Runner: ubuntu-latest                     │
+│                                                          │
+│  Step 1: actions/checkout@v4                             │
+│          └── Fetches repository source code              │
+│                                                          │
+│  Step 2: actions/setup-node@v4                           │
+│          └── Installs Node.js 20.x & npm                 │
+│                                                          │
+│  Step 3: npm install                                     │
+│          └── Installs runtime & dev dependencies         │
+│                                                          │
+│  Step 4: npm test                                        │
+│          └── Runs Jest + Supertest (tests/api.test.js)   │
+│              - GET /health                               │
+│              - GET /tasks (401 without JWT)              │
+│              - GET /tasks (200 with JWT)                 │
+│              - POST /tasks (201 Created)                 │
+│              - POST /tasks (400 validation error)        │
+│              - GET /tasks/:id (404 not found)            │
+└──────────────────────────┬───────────────────────────────┘
+                           │
+             ┌─────────────┴─────────────┐
+             ▼                           ▼
+      ❌ Non-Zero Exit Code         ✅ Exit Code 0
+      Pipeline FAILED (Red X)       Pipeline PASSED (Green Check)
+```
+
+---
+
+## 3. ⚙️ GitHub Actions Workflow Configuration
+
+Workflow file location: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+
+```yaml
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Install Dependencies and Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run automated tests
+        run: npm test
+```
+
+---
+
+## 4. 🧪 Test Suite Specifications (`tests/api.test.js`)
+
+The test suite tests the backend Express application using **Supertest** without requiring manual server startup (because `server.js` guards `app.listen` with `require.main === module` and exports `app` directly).
+
+| Test # | Endpoint & Scenario | Method | Expected Status | Assertion Focus |
+| :--- | :--- | :--- | :--- | :--- |
+| **1** | Public Health Check | `GET /health` | `200 OK` | `{ status: "ok", service: "task-manager-backend", timestamp }` |
+| **2** | Unauthenticated Task Retrieval | `GET /tasks` | `401 Unauthorized` | Rejection guard when `Authorization: Bearer <token>` is omitted |
+| **3** | Authenticated Task Retrieval | `GET /tasks` | `200 OK` | Verifies task array and HATEOAS navigational links |
+| **4** | Valid Task Creation | `POST /tasks` | `201 Created` | Verifies new task creation, ID assignment, and event trigger |
+| **5** | Missing Required Title | `POST /tasks` | `400 Bad Request` | Verifies schema validation rejection |
+| **6** | Non-existent Task Query | `GET /tasks/:id` | `404 Not Found` | Verifies graceful 404 response for absent ObjectIds |
+
+> [!NOTE]
+> The test runner connects to the local MongoDB if available, or automatically falls back to an isolated in-memory MongoDB instance (`mongodb-memory-server`) in cloud CI runners, ensuring zero dependency on host-specific credentials or external databases.
+
+---
+
+## 5. 🔬 How to Run Tests Locally
+
+Execute the test suite in the backend root directory:
+
+```bash
+# Run Jest automated test suite
+npm test
+
+# Run tests with coverage report
+npm test -- --coverage
+```
+
+---
+
+## 6. 🚨 Controlled Failure & Pass Demonstration Procedure
+
+Practical 12 explicitly requires demonstrating a failed pipeline followed by a successful one.
+
+### Step A: Introduce Deliberate Failure
+In [`tests/api.test.js`](tests/api.test.js), line 82:
+```javascript
+// Change from 200 to 500:
+expect(res.statusCode).toBe(500); // Deliberate failure demonstration
+```
+
+Run locally to confirm non-zero exit code:
+```bash
+npm test
+```
+Result: Jest fails with exit code `1` (`Expected: 500, Received: 200`).
+
+### Step B: Push Deliberate Failure to GitHub
+```bash
+git add tests/api.test.js
+git commit -m "test: demonstrate deliberate CI pipeline assertion failure"
+git push origin main
+```
+Result in GitHub Actions:
+- Workflow run status: **Failed ❌**
+- Test step shows red mark with stack trace identifying `tests/api.test.js:82`.
+
+### Step C: Restore Correct Assertion
+In [`tests/api.test.js`](tests/api.test.js), restore line 82:
+```javascript
+expect(res.statusCode).toBe(200);
+```
+
+Verify locally:
+```bash
+npm test
+```
+Result: `Test Suites: 1 passed, 1 total; Tests: 6 passed, 6 total`.
+
+### Step D: Push Correction to GitHub
+```bash
+git add tests/api.test.js
+git commit -m "fix: restore expected 200 status code in health check test"
+git push origin main
+```
+Result in GitHub Actions:
+- Workflow run status: **Passed ✅**
+- README badge reflects passing green status.
+
+---
+
+## 7. 💡 Continuous Integration (CI) vs Continuous Deployment (CD)
+
+- **Continuous Integration (CI)**: The automated practice of frequently merging code changes into a central repository, followed by automated dependency installation, linting, and automated test execution. CI validates that changes do not break existing functionality before integration.
+- **Continuous Deployment (CD)**: The automated process where every change that passes the CI pipeline is automatically packaged (e.g., Docker image built and pushed to a registry) and deployed directly to production infrastructure without human intervention.
+- **This Practical's Scope**: Focuses strictly on **CI** (automated integration testing and workflow status validation), providing the foundation upon which CD stages can safely be added.
 
 
 

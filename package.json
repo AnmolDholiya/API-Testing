@@ -9,7 +9,7 @@
     "client": "npm run dev --prefix client",
     "client:build": "npm run build --prefix client",
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue,magenta\" \"npm run server\" \"npm run client\"",
-    "test": "node test-practical10.js",
+    "test": "jest --runInBand --detectOpenHandles --forceExit",
     "test:pr9": "node test-practical9.js",
     "test:pr10": "node test-practical10.js",
     "docker:build": "docker compose build",
@@ -37,6 +37,12 @@
   },
   "devDependencies": {
     "concurrently": "^10.0.5",
-    "mongodb-memory-server": "^11.2.0"
+    "jest": "^30.5.2",
+    "mongodb-memory-server": "^11.2.0",
+    "supertest": "^7.3.1"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testTimeout": 30000
   }
 }
